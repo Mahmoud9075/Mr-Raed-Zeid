@@ -1,0 +1,23 @@
+'use client';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { api } from '@/lib/api';
+
+type Choice={id:number;text:string;position:number};
+type Question={id:number;prompt:string;level:string;position:number;question_type:'mcq'|'true_false'|'short'|'essay';choices:Choice[]};
+type Start={attempt_id:number;quiz:{title_ar:string;duration_minutes:number;question_count:number};questions:Question[]};
+type Result={score:number;correct_answers:number;total_questions:number;level_result?:string;needs_manual_review:boolean};
+type Answer={choice_id?:number;text_answer?:string};
+
+export default function QuizRunner({slug}:{slug:string}){
+ const [data,setData]=useState<Start|null>(null); const [index,setIndex]=useState(0); const [answers,setAnswers]=useState<Record<number,Answer>>({}); const [error,setError]=useState(''); const [result,setResult]=useState<Result|null>(null); const [busy,setBusy]=useState(false);
+ useEffect(()=>{setBusy(true); api<Start>(`/quizzes/${slug}/start`,{method:'POST'}).then(setData).catch(e=>setError(e instanceof Error?e.message:'تعذر بدء الاختبار')).finally(()=>setBusy(false))},[slug]);
+ const q=data?.questions[index]; const percent=useMemo(()=>data?Math.round(((index+1)/data.questions.length)*100):0,[data,index]);
+ function answered(question?:Question){if(!question)return false;const a=answers[question.id];if(!a)return false;return question.question_type==='mcq'||question.question_type==='true_false'?!!a.choice_id:!!a.text_answer?.trim()}
+ async function finish(){if(!data)return; setBusy(true); try{const payload={answers:(Object.entries(answers) as [string,Answer][]).map(([question_id,a])=>({question_id:Number(question_id),choice_id:a.choice_id||null,text_answer:a.text_answer||null}))}; const r=await api<Result>(`/quizzes/attempts/${data.attempt_id}/submit`,{method:'POST',body:JSON.stringify(payload)}); setResult(r)}catch(e){setError(e instanceof Error?e.message:'تعذر التسليم')}finally{setBusy(false)}}
+ if(error.includes('تسجيل الدخول')||error.includes('جلسة')) return <div className="card" style={{padding:28,textAlign:'center'}}><h2>سجّل دخولك أولًا</h2><p>لازم تدخل بحساب الطالب قبل بدء الاختبار حتى نحفظ نتيجتك.</p><Link className="btn btn-dark" href="/login">تسجيل الدخول</Link></div>;
+ if(error) return <div className="notice error">{error}</div>;
+ if(!data||busy&&!q) return <div className="card" style={{padding:30}}>جاري تجهيز الاختبار...</div>;
+ if(result) return <div className="card question-card result-card"><span className="eyebrow">تم التسليم</span><h1 className="section-title">نتيجتك {result.score}%</h1><p>إجابات صحيحة تلقائيًا: {result.correct_answers} من {result.total_questions}</p>{result.level_result&&<h2>المستوى المبدئي: {result.level_result}</h2>}{result.needs_manual_review&&<p className="notice">فيه سؤال مقالي محتاج مراجعة من المستر، فالدرجة الحالية مبدئية.</p>}<div className="result-actions"><Link className="btn btn-dark" href="/student">لوحة الطالب</Link><Link className="btn" href="/quizzes">الاختبارات</Link></div></div>;
+ return <><div className="card quiz-head"><div className="quiz-head-row"><b>{data.quiz.title_ar}</b><span>{index+1} / {data.questions.length}</span></div><div className="progress" style={{marginTop:12}}><i style={{width:`${percent}%`}}/></div></div><div className="card question-card"><small>المستوى: {q?.level}</small><h2>{q?.prompt}</h2>{q&&(q.question_type==='mcq'||q.question_type==='true_false')?<div className="choices">{q.choices.map(c=><button type="button" key={c.id} className={`choice ${answers[q.id]?.choice_id===c.id?'selected':''}`} onClick={()=>setAnswers(a=>({...a,[q.id]:{choice_id:c.id}}))}><span>{answers[q.id]?.choice_id===c.id?'●':'○'}</span><span>{c.text}</span></button>)}</div>:<div className="field" style={{margin:'22px 0'}}><label>{q?.question_type==='essay'?'اكتب إجابتك بالتفصيل':'اكتب إجابتك'}</label><textarea className="input" rows={q?.question_type==='essay'?7:3} value={q?answers[q.id]?.text_answer||'':''} onChange={e=>q&&setAnswers(a=>({...a,[q.id]:{text_answer:e.target.value}}))}/></div>}<div className="quiz-controls"><button className="btn" disabled={index===0} onClick={()=>setIndex(i=>i-1)}>السابق</button>{index<data.questions.length-1?<button className="btn btn-primary" disabled={!answered(q)} onClick={()=>setIndex(i=>i+1)}>التالي</button>:<button className="btn btn-dark" disabled={busy||!data.questions.every(answered)} onClick={finish}>{busy?'جاري التسليم...':'إنهاء الاختبار'}</button>}</div>{index===data.questions.length-1&&!data.questions.every(answered)?<p className="quiz-warning">جاوب كل الأسئلة قبل التسليم النهائي.</p>:null}</div></>
+}
