@@ -15,15 +15,6 @@ def run_seed():
         if not admin:
             admin = User(first_name="Raed", last_name="Admin", email=settings.admin_email.lower(), phone="01000000000", password_hash=hash_password(settings.admin_password), role="owner", is_active=True, is_verified=True)
             db.add(admin)
-        quiz = db.scalar(select(Quiz).where(Quiz.slug == "english-placement-50"))
-        if not quiz:
-            quiz = Quiz(slug="english-placement-50", title_ar="اختبار تحديد المستوى", title_en="English Placement Test", description_ar="اختبار من 50 سؤالًا متدرجًا في القواعد والمفردات والاستخدام.", description_en="A 50-question placement test covering grammar, vocabulary, and usage.", duration_minutes=30, passing_score=60, is_published=True, is_placement=True)
-            db.add(quiz); db.flush()
-            for pos,(level,prompt,choices,correct,explanation) in enumerate(QUESTIONS,1):
-                q=Question(quiz_id=quiz.id,prompt=prompt,level=level,position=pos,points=1,explanation=explanation)
-                db.add(q); db.flush()
-                for idx,text in enumerate(choices,1):
-                    db.add(Choice(question_id=q.id,text=text,is_correct=(idx-1==correct),position=idx))
         defaults={
             "teacher_name":"Mr. Raed Zeid",
             "teacher_name_ar":"مستر رائد زيد",
@@ -75,7 +66,7 @@ def run_seed():
             if not db.scalar(select(ChatKnowledge).where(ChatKnowledge.question == question)):
                 db.add(ChatKnowledge(category=category,question=question,answer=answer,keywords=keywords,is_active=True))
         db.commit()
-        print("Seed completed: owner + 50-question placement test + site settings + pages + assistant knowledge")
+        print("Seed completed: owner + site settings + pages + assistant knowledge")
     finally:
         db.close()
 

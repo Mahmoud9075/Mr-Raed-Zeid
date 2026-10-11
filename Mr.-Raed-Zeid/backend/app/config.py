@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     admin_password: str = "ChangeMe123!"
     rate_limit_per_minute: int = 120
     auth_rate_limit_per_minute: int = 12
+    assistant_rate_limit_per_minute: int = 30
     upload_dir: str = "./uploads"
+    max_upload_mb: int = 5
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
     smtp_host: str = ""
@@ -24,12 +26,27 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_from: str = ""
-    admin_otp_required: bool = False
+    admin_otp_required: bool = True
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property
     def origins(self) -> list[str]:
-        return [x.strip() for x in self.allowed_origins.split(",") if x.strip()]
+        return [x.strip().rstrip("/") for x in self.allowed_origins.split(",") if x.strip()]
+
+    def validate_production(self) -> None:
+        if self.env != "production":
+            return
+        problems: list[str] = []
+        if self.database_url.startswith("sqlite"):
+            problems.append("DATABASE_URL must use a production database")
+        if self.jwt_secret.startswith("CHANGE_ME") or len(self.jwt_secret) < 32:
+            problems.append("JWT_SECRET must be a strong production secret")
+        if self.admin_password == "ChangeMe123!" or len(self.admin_password) < 10:
+            problems.append("ADMIN_PASSWORD must be changed before production")
+        if not self.origins:
+            problems.append("ALLOWED_ORIGINS must contain the frontend origin")
+        if problems:
+            raise RuntimeError("; ".join(problems))
 
 
 @lru_cache

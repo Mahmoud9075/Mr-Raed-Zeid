@@ -28,9 +28,9 @@ def list_quizzes(db: Session = Depends(get_db), user: User = Depends(current_use
     for q in quizzes:
         if q.starts_at and dt_aware(q.starts_at) > now: continue
         if q.ends_at and dt_aware(q.ends_at) < now: continue
-        if q.stage and user.stage and q.stage != user.stage: continue
-        if q.education_type and user.education_type and q.education_type != user.education_type: continue
-        if q.grade and user.grade and q.grade != user.grade: continue
+        if q.stage and q.stage != user.stage: continue
+        if q.education_type and q.education_type != user.education_type: continue
+        if q.grade and q.grade != user.grade: continue
         out.append(summary(q))
     return out
 
@@ -42,7 +42,9 @@ def start_quiz(slug: str, db: Session = Depends(get_db), user: User = Depends(cu
     now = datetime.now(timezone.utc)
     if quiz.starts_at and dt_aware(quiz.starts_at) > now: raise HTTPException(403, "الاختبار لم يبدأ بعد")
     if quiz.ends_at and dt_aware(quiz.ends_at) < now: raise HTTPException(403, "انتهى وقت الاختبار")
-    if quiz.stage and user.stage and quiz.stage != user.stage: raise HTTPException(403, "الاختبار غير مخصص لمرحلتك")
+    if quiz.stage and quiz.stage != user.stage: raise HTTPException(403, "الاختبار غير مخصص لمرحلتك")
+    if quiz.education_type and quiz.education_type != user.education_type: raise HTTPException(403, "الاختبار غير مخصص لنوع تعليمك")
+    if quiz.grade and quiz.grade != user.grade: raise HTTPException(403, "الاختبار غير مخصص لصفك")
     attempts_count = db.scalar(select(func.count()).select_from(QuizAttempt).where(QuizAttempt.quiz_id == quiz.id, QuizAttempt.user_id == user.id, QuizAttempt.submitted_at.is_not(None))) or 0
     if attempts_count >= quiz.max_attempts: raise HTTPException(403, "وصلت للحد الأقصى من المحاولات")
     attempt = QuizAttempt(quiz_id=quiz.id, user_id=user.id)
@@ -63,6 +65,11 @@ def submit_attempt(attempt_id: int, data: SubmitAttemptIn, db: Session = Depends
     attempt = db.scalar(select(QuizAttempt).where(QuizAttempt.id == attempt_id, QuizAttempt.user_id == user.id).options(selectinload(QuizAttempt.quiz).selectinload(Quiz.questions).selectinload(Question.choices), selectinload(QuizAttempt.answers)))
     if not attempt: raise HTTPException(404, "المحاولة غير موجودة")
     if attempt.submitted_at: raise HTTPException(409, "تم تسليم هذه المحاولة من قبل")
+    started_at = dt_aware(attempt.started_at)
+    if attempt.quiz.duration_minutes and started_at:
+        elapsed_seconds = (datetime.now(timezone.utc) - started_at).total_seconds()
+        if elapsed_seconds > (attempt.quiz.duration_minutes * 60) + 30:
+            raise HTTPException(408, "انتهى وقت الاختبار")
     questions = {q.id: q for q in attempt.quiz.questions if q.is_active}
     provided = {}
     for ans in data.answers:

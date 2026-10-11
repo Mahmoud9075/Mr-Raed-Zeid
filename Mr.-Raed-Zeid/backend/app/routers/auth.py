@@ -20,7 +20,8 @@ def audit(db, actor, action, entity_type, entity_id=None, metadata="{}"):
 
 
 def set_auth_cookies(response: Response, access: str, refresh: str, expires: int):
-    settings = get_settings(); secure_cookie = settings.env == "production"
+    settings = get_settings()
+    secure_cookie = settings.env == "production"
     response.set_cookie("access_token", access, httponly=True, secure=secure_cookie, samesite="strict", max_age=expires, path="/")
     response.set_cookie("refresh_token", refresh, httponly=True, secure=secure_cookie, samesite="strict", max_age=settings.refresh_token_days * 86400, path="/")
 
@@ -88,7 +89,7 @@ def login(data: LoginIn, request: Request, response: Response, db: Session = Dep
         except Exception:
             sent = False
         if settings.env == "production" and not sent:
-            raise HTTPException(503, "تعذر إرسال كود التحقق للإيميل")
+            raise HTTPException(503, "تعذر إكمال التحقق حاليًا")
         payload = {"requires_otp": True, "challenge_id": challenge.id}
         if settings.env != "production" and not sent:
             payload["dev_code"] = code
