@@ -1,4 +1,4 @@
-﻿import Header from "@/components/Header";
+import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { api } from "@/lib/api";
 import { notFound } from "next/navigation";
@@ -22,7 +22,6 @@ export default async function CustomPage({
   }
 
   const page = result as CustomPageData;
-
   let body = "";
 
   try {
@@ -37,7 +36,7 @@ export default async function CustomPage({
       <Header />
       <main className="section">
         <div className="container">
-          <article className="card">
+          <article className="card custom-page">
             <h1 className="section-title">{page.title}</h1>
             <div className="custom-body">
               {body.split("\n").map((line, index) => (
