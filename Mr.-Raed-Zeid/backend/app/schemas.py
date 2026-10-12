@@ -1,6 +1,7 @@
+from typing import Literal
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-STAGES = ["ابتدائي", "إعدادي", "ثانوي", "جامعي", "كورسات للكبار"]
+STAGES = ["إعدادي", "ثانوي", "كورسات للكبار"]
 
 
 class RegisterIn(BaseModel):
@@ -249,5 +250,11 @@ class ChatKnowledgeIn(BaseModel):
     keywords: str = ""
 
 
+class AssistantHistoryItem(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(min_length=1, max_length=2000)
+
+
 class AssistantMessageIn(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+    history: list[AssistantHistoryItem] = Field(default_factory=list, max_length=12)
