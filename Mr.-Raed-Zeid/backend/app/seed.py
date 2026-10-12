@@ -30,7 +30,7 @@ def run_seed():
             "stage_primary_enabled":"false",
             "stage_prep_enabled":"true",
             "stage_secondary_enabled":"true",
-            "stage_university_enabled":"true",
+            "stage_university_enabled":"false",
             "stage_adults_enabled":"true",
             "youtube":"https://youtube.com/@rempire929"
         }
