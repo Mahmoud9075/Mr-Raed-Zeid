@@ -1,2 +1,34 @@
-import Link from 'next/link';
-export default function English(){return <div dir="ltr"><header className="site-header"><nav className="nav-shell"><Link className="brand" href="/en"><img src="/media/logo.png" alt="Mr. Raed Zeid"/></Link><div className="nav-links"><Link href="/en">Home</Link><Link href="#about-en">About</Link><Link href="/quizzes">Quizzes</Link><Link href="#contact-en">Contact</Link></div><div className="nav-actions"><Link className="btn btn-dark" href="/login">Student Portal</Link><Link className="btn" href="/">AR</Link></div></nav></header><main><section className="hero"><div className="container"><div className="hero-card" style={{direction:'ltr'}}><div className="hero-copy"><h1 className="hero-name" style={{textAlign:'left'}}>Mr. Raed <span>Zeid.</span></h1><h2 className="hero-tagline">Understand English. Speak with confidence.</h2><p className="hero-desc">English teacher with more than 8 years of experience, combining clear explanations, practical training, and continuous student follow-up.</p><div className="hero-badges"><span className="pill">8+ years</span><span className="pill">All stages</span><span className="pill">Continuous follow-up</span></div><div className="hero-actions"><Link className="btn btn-primary" href="/quizzes">Placement test</Link><Link className="btn" href="#about-en">About Mr. Raed</Link></div></div><div className="hero-visual"><div className="portrait-frame"><img src="/media/hero-raed.jpg" alt="Mr. Raed Zeid"/></div></div></div></div></section><section id="about-en" className="section"><div className="container about-grid" style={{direction:'ltr'}}><div className="about-copy"><span className="eyebrow">About the teacher</span><h2 className="section-title">Mr. Raed Zeid</h2><p>Graduate of the Faculty of Arts, Damanhour University, English Department – Languages and Translation. Master&apos;s researcher in English, holder of an educational diploma, with more than 8 years of teaching and translation experience.</p><div className="stage-list"><span>Primary</span><span>Preparatory</span><span>Secondary</span><span>Azhar Secondary</span><span>Technical Education</span><span>University</span></div></div><figure className="about-photo"><img src="/media/about-raed.png" alt="Mr. Raed at his desk"/></figure></div></section><section className="section soft-section"><div className="container"><span className="eyebrow">Quizzes & Exams</span><h2 className="section-title">50-question English placement test</h2><p className="section-subtitle">A progressive test covering grammar, vocabulary and usage, with the result saved in the student account.</p><Link className="btn btn-dark" style={{marginTop:20}} href="/quizzes">Start the test</Link></div></section><section id="contact-en" className="section"><div className="container"><span className="eyebrow">Contact</span><h2 className="section-title">Contact Mr. Raed Zeid</h2><p className="section-subtitle">For schedules, groups, reservations and study details.</p><a className="btn btn-dark" style={{marginTop:20}} href="https://wa.me/201033246113" target="_blank">WhatsApp</a></div></section></main></div>}
+import Header from '@/components/Header';
+import Hero from '@/components/Hero';
+import About from '@/components/About';
+import QuizPromo from '@/components/QuizPromo';
+import Moments from '@/components/Moments';
+import Achievements from '@/components/Achievements';
+import Reviews from '@/components/Reviews';
+import Contact from '@/components/Contact';
+import Footer from '@/components/Footer';
+import { api } from '@/lib/api';
+
+type Nav = { slug: string };
+
+export default async function EnglishHome() {
+  let nav: Nav[] = [];
+  try { nav = await api<Nav[]>('/navigation'); } catch {}
+  const visible = (slug: string) => !nav.length || nav.some((item) => item.slug === slug);
+
+  return (
+    <div className="english-page" dir="ltr" lang="en">
+      <Header lang="en" />
+      <main>
+        <Hero lang="en" />
+        {visible('about') && <About lang="en" />}
+        {visible('quizzes') && <QuizPromo lang="en" />}
+        {visible('moments') && <Moments lang="en" />}
+        {visible('students') && <Achievements lang="en" />}
+        {visible('reviews') && <Reviews lang="en" />}
+        {visible('contact') && <Contact lang="en" />}
+      </main>
+      <Footer lang="en" />
+    </div>
+  );
+}
