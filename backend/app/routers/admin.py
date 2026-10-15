@@ -289,8 +289,64 @@ def admin_quizzes(db: Session = Depends(get_db)):
         "id":q.id,"slug":q.slug,"title_ar":q.title_ar,"stage":q.stage,
         "education_type":q.education_type,"grade":q.grade,"published":q.is_published,
         "questions":len([x for x in q.questions if x.is_active]),"max_attempts":q.max_attempts,
-        "duration_minutes":q.duration_minutes,
+        "duration_minutes":q.duration_minutes,"is_placement":q.is_placement,
+        "randomize_questions":bool(q.randomize_questions or q.is_placement),
     } for q in rows]
+
+
+def _question_item(question: Question) -> dict:
+    return {
+        "id": question.id,
+        "prompt": question.prompt,
+        "explanation": question.explanation,
+        "level": question.level,
+        "question_type": question.question_type,
+        "expected_answer": question.expected_answer,
+        "position": question.position,
+        "points": question.points,
+        "is_active": question.is_active,
+        "choices": [
+            {
+                "id": choice.id,
+                "text": choice.text,
+                "position": choice.position,
+                "is_correct": choice.is_correct,
+            }
+            for choice in question.choices
+        ],
+    }
+
+
+def _ensure_quiz_can_change_questions(db: Session, quiz_id: int) -> None:
+    active_attempt = db.scalar(
+        select(QuizAttempt.id).where(
+            QuizAttempt.quiz_id == quiz_id,
+            QuizAttempt.submitted_at.is_(None),
+        ).limit(1)
+    )
+    if active_attempt:
+        raise HTTPException(409, "فيه طالب بيحل الاختبار دلوقتي. استنى لحد ما المحاولة تنتهي قبل تعديل بنك الأسئلة")
+
+
+@router.get("/quizzes/{quiz_id}")
+def quiz_details(quiz_id: int, db: Session = Depends(get_db)):
+    quiz = db.scalar(
+        select(Quiz).where(Quiz.id == quiz_id, Quiz.is_archived.is_(False))
+        .options(selectinload(Quiz.questions).selectinload(Question.choices))
+    )
+    if not quiz:
+        raise HTTPException(404, "الاختبار غير موجود")
+    active_questions = [q for q in quiz.questions if q.is_active]
+    return {
+        "id": quiz.id,
+        "slug": quiz.slug,
+        "title_ar": quiz.title_ar,
+        "is_placement": quiz.is_placement,
+        "randomize_questions": bool(quiz.randomize_questions or quiz.is_placement),
+        "question_pool_count": len(active_questions),
+        "questions_per_attempt": min(50, len(active_questions)) if quiz.is_placement else len(active_questions),
+        "questions": [_question_item(q) for q in sorted(active_questions, key=lambda item: item.position)],
+    }
 
 
 @router.post("/quizzes", status_code=201)
@@ -320,6 +376,77 @@ def add_question(quiz_id: int, data: QuestionCreateIn, db: Session = Depends(get
     audit(db, actor.id, "question_added", "question", q.id)
     db.commit()
     return {"id":q.id}
+
+
+@router.put("/questions/{question_id}")
+def update_question(question_id: int, data: QuestionCreateIn, db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    question = db.scalar(
+        select(Question).where(Question.id == question_id)
+        .options(selectinload(Question.choices))
+    )
+    if not question or not question.is_active:
+        raise HTTPException(404, "السؤال غير موجود")
+    _ensure_quiz_can_change_questions(db, question.quiz_id)
+
+    duplicate_position = db.scalar(
+        select(Question.id).where(
+            Question.quiz_id == question.quiz_id,
+            Question.position == data.position,
+            Question.id != question.id,
+        )
+    )
+    if duplicate_position:
+        raise HTTPException(409, "رقم ترتيب السؤال مستخدم داخل الاختبار")
+
+    used_before = db.scalar(select(QuizAnswer.id).where(QuizAnswer.question_id == question.id).limit(1)) is not None
+    if used_before:
+        # Preserve historical attempts exactly. The old question stays referenced by
+        # old answers, while a fresh active copy replaces it in the question bank.
+        old_position = question.position
+        question.is_active = False
+        question.position = -question.id
+        replacement_question = Question(
+            quiz_id=question.quiz_id, prompt=data.prompt.strip(), explanation=data.explanation.strip(), level=data.level,
+            question_type=data.question_type, expected_answer=data.expected_answer, position=data.position, points=data.points,
+            is_active=True,
+        )
+        db.add(replacement_question); db.flush()
+        for idx, (text, ok) in enumerate(data.choices, 1):
+            db.add(Choice(question_id=replacement_question.id, text=text.strip(), is_correct=ok, position=idx))
+        audit(db, actor.id, "question_replaced", "question", replacement_question.id, {"replaced_question_id": question.id, "old_position": old_position})
+        db.commit()
+        return {"id": replacement_question.id, "replaced": True}
+
+    question.prompt = data.prompt.strip()
+    question.explanation = data.explanation.strip()
+    question.level = data.level
+    question.question_type = data.question_type
+    question.expected_answer = data.expected_answer
+    question.position = data.position
+    question.points = data.points
+    for choice in list(question.choices):
+        db.delete(choice)
+    db.flush()
+    for idx, (text, ok) in enumerate(data.choices, 1):
+        db.add(Choice(question_id=question.id, text=text.strip(), is_correct=ok, position=idx))
+    audit(db, actor.id, "question_updated", "question", question.id)
+    db.commit()
+    return {"id": question.id, "replaced": False}
+
+
+@router.delete("/questions/{question_id}")
+def delete_question(question_id: int, db: Session = Depends(get_db), actor: User = Depends(admin_user)):
+    question = db.get(Question, question_id)
+    if not question or not question.is_active:
+        raise HTTPException(404, "السؤال غير موجود")
+    _ensure_quiz_can_change_questions(db, question.quiz_id)
+    question.is_active = False
+    # Free the visible position so a new question can reuse it while keeping
+    # historical attempts intact. Negative ids are unique within the quiz.
+    question.position = -question.id
+    audit(db, actor.id, "question_deactivated", "question", question.id)
+    db.commit()
+    return {"deleted": True}
 
 
 @router.patch("/quizzes/{quiz_id}/publish")
