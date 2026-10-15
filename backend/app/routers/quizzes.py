@@ -20,8 +20,12 @@ from ..deps import current_user
 
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 
+PLACEMENT_QUESTION_COUNT = 50
+
 
 def summary(q: Quiz) -> QuizSummaryOut:
+    active_count = len([x for x in q.questions if x.is_active])
+    display_count = min(PLACEMENT_QUESTION_COUNT, active_count) if q.is_placement else active_count
     return QuizSummaryOut(
         id=q.id,
         slug=q.slug,
@@ -29,7 +33,7 @@ def summary(q: Quiz) -> QuizSummaryOut:
         title_en=q.title_en,
         description_ar=q.description_ar,
         duration_minutes=q.duration_minutes,
-        question_count=len([x for x in q.questions if x.is_active]),
+        question_count=display_count,
         stage=q.stage,
         education_type=q.education_type,
         grade=q.grade,
@@ -74,9 +78,12 @@ def _remaining_seconds(attempt: QuizAttempt, now: datetime | None = None) -> int
 
 def _ordered_questions(quiz: Quiz, attempt_id: int) -> list[Question]:
     questions = [q for q in quiz.questions if q.is_active]
-    if quiz.randomize_questions:
-        # Deterministic order per attempt so refresh/resume never reshuffles the exam.
+    # Placement attempts are always randomized. The attempt id is used as a stable
+    # seed so refresh/resume keeps the exact same questions and order.
+    if quiz.randomize_questions or quiz.is_placement:
         random.Random(attempt_id).shuffle(questions)
+    if quiz.is_placement:
+        questions = questions[:PLACEMENT_QUESTION_COUNT]
     return questions
 
 
@@ -87,7 +94,7 @@ def _answer_has_value(question: Question, answer: QuizAnswer) -> bool:
 
 
 def _upsert_answers(db: Session, attempt: QuizAttempt, incoming) -> None:
-    questions = {q.id: q for q in attempt.quiz.questions if q.is_active}
+    questions = {q.id: q for q in _ordered_questions(attempt.quiz, attempt.id)}
     existing = {a.question_id: a for a in attempt.answers}
     seen: set[int] = set()
     for ans in incoming:
@@ -120,13 +127,12 @@ def _upsert_answers(db: Session, attempt: QuizAttempt, incoming) -> None:
 
 
 def _existing_result(attempt: QuizAttempt) -> AttemptResultOut:
-    questions = [q for q in attempt.quiz.questions if q.is_active]
     correct = sum(1 for answer in attempt.answers if answer.is_correct is True)
     return AttemptResultOut(
         attempt_id=attempt.id,
         score=float(attempt.score or 0),
         correct_answers=correct,
-        total_questions=len(questions),
+        total_questions=len(attempt.answers),
         level_result=attempt.level_result,
         needs_manual_review=attempt.needs_manual_review,
     )
@@ -137,7 +143,7 @@ def normalize_text(value: str | None) -> str:
 
 def _finalize_attempt(db: Session, attempt: QuizAttempt, now: datetime | None = None) -> AttemptResultOut:
     now = now or datetime.now(timezone.utc)
-    questions = {q.id: q for q in attempt.quiz.questions if q.is_active}
+    questions = {q.id: q for q in _ordered_questions(attempt.quiz, attempt.id)}
     answers = {a.question_id: a for a in attempt.answers}
     correct = 0
     total_points = sum(q.points for q in questions.values()) or 1
@@ -335,7 +341,7 @@ def submit_attempt(attempt_id: int, data: SubmitAttemptIn, db: Session = Depends
     if not expired:
         _upsert_answers(db, attempt, data.answers)
         db.flush()
-        questions = {q.id: q for q in attempt.quiz.questions if q.is_active}
+        questions = {q.id: q for q in _ordered_questions(attempt.quiz, attempt.id)}
         saved = {a.question_id: a for a in attempt.answers}
         missing = [qid for qid, q in questions.items() if qid not in saved or not _answer_has_value(q, saved[qid])]
         if missing:
