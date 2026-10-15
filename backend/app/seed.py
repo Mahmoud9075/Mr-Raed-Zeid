@@ -1,7 +1,7 @@
-from sqlalchemy import select, delete
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from .db import Base, engine, SessionLocal
-from .models import User, Quiz, Question, Choice, SiteSetting, SitePage, ChatKnowledge, QuizAttempt
+from .models import User, Quiz, Question, Choice, SiteSetting, SitePage, ChatKnowledge
 from .security import hash_password
 from .config import get_settings
 
@@ -19,12 +19,12 @@ def _seed_placement_quiz(db):
             slug="english-placement-50",
             title_ar="اختبار تحديد المستوى في اللغة الإنجليزية",
             title_en="English Placement Test",
-            description_ar="50 سؤالًا لتحديد مستواك المبدئي من A1 إلى C1. سؤال واحد في كل خطوة والنتيجة تظهر فورًا.",
+            description_ar="50 سؤالًا عشوائيًا من بنك الأسئلة لتحديد مستواك المبدئي من A1 إلى C1. سؤال واحد في كل خطوة والنتيجة تظهر فورًا.",
             description_en="50 questions to estimate your English level from A1 to C1.",
             duration_minutes=45,
             passing_score=60,
             max_attempts=2,
-            randomize_questions=False,
+            randomize_questions=True,
             show_result_immediately=True,
             is_published=True,
             is_placement=True,
@@ -35,26 +35,20 @@ def _seed_placement_quiz(db):
     else:
         quiz.title_ar = "اختبار تحديد المستوى في اللغة الإنجليزية"
         quiz.title_en = "English Placement Test"
-        quiz.description_ar = "50 سؤالًا لتحديد مستواك المبدئي من A1 إلى C1. سؤال واحد في كل خطوة والنتيجة تظهر فورًا."
+        quiz.description_ar = "50 سؤالًا عشوائيًا من بنك الأسئلة لتحديد مستواك المبدئي من A1 إلى C1. سؤال واحد في كل خطوة والنتيجة تظهر فورًا."
         quiz.duration_minutes = 45
         quiz.max_attempts = max(quiz.max_attempts or 0, 2)
-        quiz.randomize_questions = False
+        quiz.randomize_questions = True
         quiz.show_result_immediately = True
         quiz.is_published = True
         quiz.is_placement = True
         quiz.is_archived = False
 
     active_questions = [q for q in quiz.questions if q.is_active] if quiz.questions else []
-    attempts = db.scalar(select(QuizAttempt.id).where(QuizAttempt.quiz_id == quiz.id).limit(1))
-    if len(active_questions) == 50:
+    # Seed the canonical question bank only once. Admin changes/additions/deletions
+    # must remain untouched on every later restart or redeploy.
+    if active_questions:
         return
-    # A fresh or unused installation can be repaired safely to the canonical 50 questions.
-    if attempts:
-        return
-    if quiz.questions:
-        for q in list(quiz.questions):
-            db.delete(q)
-        db.flush()
     for position, (level, prompt, choices, correct_index, explanation) in enumerate(QUESTIONS, start=1):
         question = Question(
             quiz_id=quiz.id,
