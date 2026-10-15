@@ -1,4 +1,0 @@
-import Header from '@/components/Header'; import Hero from '@/components/Hero'; import About from '@/components/About'; import QuizPromo from '@/components/QuizPromo'; import Moments from '@/components/Moments'; import Achievements from '@/components/Achievements'; import Reviews from '@/components/Reviews'; import Contact from '@/components/Contact'; import Footer from '@/components/Footer';
-import {api} from '@/lib/api';
-type Nav={slug:string};
-export default async function Home(){let nav:Nav[]=[];try{nav=await api<Nav[]>('/navigation')}catch{} const visible=(slug:string)=>!nav.length||nav.some(x=>x.slug===slug);return <><Header/><main><Hero/>{visible('about')&&<About/>}{visible('quizzes')&&<QuizPromo/>}{visible('moments')&&<Moments/>}{visible('students')&&<Achievements/>}{visible('reviews')&&<Reviews/>}{visible('contact')&&<Contact/>}</main><Footer/></>}

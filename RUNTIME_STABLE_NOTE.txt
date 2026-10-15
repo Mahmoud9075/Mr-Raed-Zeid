@@ -1,0 +1,7 @@
+IMPORTANT LOCAL TEST URL
+========================
+Use START_LOCAL_WINDOWS.bat and open ONLY:
+http://127.0.0.1:3100
+
+This dedicated port prevents an older copy still running on port 3000 from being mistaken for the new project.
+The launcher also clears .next before every run and waits for both Backend and Frontend health checks.

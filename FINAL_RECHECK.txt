@@ -1,0 +1,15 @@
+FINAL RECHECK
+=============
+- Backend regression suite: 20/20 passed.
+- Internal static links reviewed; no missing page route was found.
+- The admin Excel endpoint is an API download endpoint, not a page route.
+- Header contains: account/login, language switch, theme switch, hamburger menu.
+- Floating WhatsApp button now uses a distinct WhatsApp-style phone-in-bubble icon,
+  separate from the assistant chat icon.
+- Assistant chat still requires a signed-in student account.
+- No .env, local database, node_modules, .next cache, or API key is included in this package.
+
+Important runtime note:
+Run the project through START_LOCAL_WINDOWS.bat after creating .env and running npm install
+inside frontend. Opening generated/source files directly in the browser is not a supported
+way to run a Next.js application.

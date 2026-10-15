@@ -1,0 +1,14 @@
+fastapi==0.143.1
+starlette==1.8.0
+uvicorn[standard]==0.48.0
+SQLAlchemy==2.0.50
+PyJWT==2.15.0
+pydantic==2.13.4
+pydantic-settings==2.8.1
+email-validator==2.2.0
+python-multipart==0.0.32
+alembic==1.18.4
+psycopg[binary]==3.2.10
+httpx==0.28.1
+pytest==8.4.2
+openpyxl==3.1.5
