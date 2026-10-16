@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from .config import get_settings
 from .db import Base, SessionLocal, engine
+from .seed import run_quiz_seed
 from .routers import auth, quizzes, reviews, public, admin, notifications, assistant, search
 
 settings = get_settings()
@@ -22,6 +23,7 @@ async def lifespan(app: FastAPI):
         if engine.dialect.name == "postgresql":
             conn.execute(text("SELECT pg_advisory_xact_lock(987654321)"))
         Base.metadata.create_all(bind=conn)
+    run_quiz_seed()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     yield
 

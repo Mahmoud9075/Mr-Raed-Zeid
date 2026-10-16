@@ -10,7 +10,11 @@ os.environ["RATE_LIMIT_PER_MINUTE"] = "10000"
 os.environ["ASSISTANT_RATE_LIMIT_PER_MINUTE"] = "10000"
 from fastapi.testclient import TestClient
 from app.main import app
-from app.seed import run_seed
+from app.db import SessionLocal
+from app.models import Question, Quiz
+from app.seed import QUESTIONS, run_quiz_seed, run_seed
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from app.routers import assistant as assistant_router
 
 run_seed()
@@ -60,6 +64,74 @@ def test_health_and_quiz_count():
     h = student_headers()
     quizzes = client.get('/api/v1/quizzes', headers=h).json()
     assert quizzes[0]['question_count'] == 50
+
+
+def test_placement_seed_is_additive_and_idempotent():
+    db = SessionLocal()
+    quiz = db.scalar(
+        select(Quiz)
+        .where(Quiz.slug == 'english-placement-50')
+        .options(selectinload(Quiz.questions).selectinload(Question.choices))
+    )
+    assert quiz is not None
+    original_title = quiz.title_ar
+    original_duration = quiz.duration_minutes
+    quiz.title_ar = 'Admin-edited placement title'
+    quiz.duration_minutes = 47
+    edited_question = next(question for question in quiz.questions if question.prompt == QUESTIONS[0][1])
+    original_prompt = edited_question.prompt
+    edited_question.prompt = 'Admin-edited placement question'
+    manual_placement_question = Question(
+        quiz_id=quiz.id,
+        prompt='Admin-created placement question',
+        position=max(question.position for question in quiz.questions) + 1,
+    )
+    db.add(manual_placement_question)
+    custom_quiz = Quiz(slug='admin-created-quiz', title_ar='Admin quiz')
+    db.add(custom_quiz)
+    db.flush()
+    custom_question = Question(
+        quiz_id=custom_quiz.id,
+        prompt='Admin-created question',
+        position=1,
+    )
+    db.add(custom_question)
+    db.commit()
+
+    try:
+        run_quiz_seed()
+        run_quiz_seed()
+        db.expire_all()
+        quiz = db.scalar(
+            select(Quiz)
+            .where(Quiz.slug == 'english-placement-50')
+            .options(selectinload(Quiz.questions).selectinload(Question.choices))
+        )
+        assert quiz is not None
+        assert quiz.title_ar == 'Admin-edited placement title'
+        assert quiz.duration_minutes == 47
+        assert any(question.prompt == 'Admin-edited placement question' for question in quiz.questions)
+        assert any(question.prompt == 'Admin-created placement question' for question in quiz.questions)
+        seeded_question = next(question for question in quiz.questions if question.prompt == QUESTIONS[0][1])
+        assert len(seeded_question.choices) == len(QUESTIONS[0][2])
+        assert db.scalar(select(Quiz).where(Quiz.slug == 'admin-created-quiz')) is not None
+        assert db.scalar(select(Question).where(Question.id == custom_question.id)) is not None
+    finally:
+        quiz = db.scalar(
+            select(Quiz)
+            .where(Quiz.slug == 'english-placement-50')
+            .options(selectinload(Quiz.questions))
+        )
+        for question in list(quiz.questions):
+            if question.prompt in {QUESTIONS[0][1], 'Admin-created placement question'}:
+                db.delete(question)
+            elif question.prompt == 'Admin-edited placement question':
+                question.prompt = original_prompt
+        quiz.title_ar = original_title
+        quiz.duration_minutes = original_duration
+        db.delete(db.scalar(select(Quiz).where(Quiz.slug == 'admin-created-quiz')))
+        db.commit()
+        db.close()
 
 
 def test_student_full_quiz_flow():

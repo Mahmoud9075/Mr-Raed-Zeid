@@ -1,5 +1,5 @@
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session, selectinload
 from .db import Base, engine, SessionLocal
 from .models import User, Quiz, Question, Choice, SiteSetting, SitePage, ChatKnowledge
 from .security import hash_password
@@ -32,24 +32,18 @@ def _seed_placement_quiz(db):
         )
         db.add(quiz)
         db.flush()
-    else:
-        quiz.title_ar = "اختبار تحديد المستوى في اللغة الإنجليزية"
-        quiz.title_en = "English Placement Test"
-        quiz.description_ar = "50 سؤالًا عشوائيًا من بنك الأسئلة لتحديد مستواك المبدئي من A1 إلى C1. سؤال واحد في كل خطوة والنتيجة تظهر فورًا."
-        quiz.duration_minutes = 45
-        quiz.max_attempts = max(quiz.max_attempts or 0, 2)
-        quiz.randomize_questions = True
-        quiz.show_result_immediately = True
-        quiz.is_published = True
-        quiz.is_placement = True
-        quiz.is_archived = False
-
-    active_questions = [q for q in quiz.questions if q.is_active] if quiz.questions else []
-    # Seed the canonical question bank only once. Admin changes/additions/deletions
-    # must remain untouched on every later restart or redeploy.
-    if active_questions:
-        return
-    for position, (level, prompt, choices, correct_index, explanation) in enumerate(QUESTIONS, start=1):
+    existing_prompts = {question.prompt for question in quiz.questions}
+    used_positions = {question.position for question in quiz.questions}
+    next_position = max(used_positions, default=0) + 1
+    for canonical_position, (level, prompt, choices, correct_index, explanation) in enumerate(QUESTIONS, start=1):
+        if prompt in existing_prompts:
+            continue
+        position = canonical_position
+        if position in used_positions:
+            while next_position in used_positions:
+                next_position += 1
+            position = next_position
+            next_position += 1
         question = Question(
             quiz_id=quiz.id,
             prompt=prompt,
@@ -71,6 +65,17 @@ def _seed_placement_quiz(db):
                     position=choice_position,
                 )
             )
+        existing_prompts.add(prompt)
+        used_positions.add(position)
+
+
+def run_quiz_seed():
+    with engine.begin() as conn:
+        if engine.dialect.name == "postgresql":
+            conn.execute(text("SELECT pg_advisory_xact_lock(987654321)"))
+        with Session(bind=conn, join_transaction_mode="create_savepoint") as db:
+            _seed_placement_quiz(db)
+            db.commit()
 
 
 def run_seed():
