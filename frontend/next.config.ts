@@ -29,8 +29,8 @@ const contentSecurityPolicy = [
   "media-src 'self' blob:",
   "worker-src 'self' blob:",
   scriptSrc,
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' data: https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
   connectSrc
 ].join('; ');
 
