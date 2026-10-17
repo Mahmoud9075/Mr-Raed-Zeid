@@ -11,7 +11,7 @@ os.environ["ASSISTANT_RATE_LIMIT_PER_MINUTE"] = "10000"
 from fastapi.testclient import TestClient
 from app.main import app
 from app.db import SessionLocal
-from app.models import Question, Quiz
+from app.models import ChatKnowledge, Question, Quiz, SitePage, SiteSetting
 from app.seed import QUESTIONS, run_quiz_seed, run_seed
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -134,6 +134,74 @@ def test_placement_seed_is_additive_and_idempotent():
         db.close()
 
 
+def test_full_seed_backfills_site_data_and_preserves_admin_edits():
+    db = SessionLocal()
+    hours = db.get(SiteSetting, 'center_hours')
+    phone = db.get(SiteSetting, 'secondary_phone')
+    home_page = db.scalar(select(SitePage).where(SitePage.slug == 'home'))
+    booking = db.scalar(select(ChatKnowledge).where(ChatKnowledge.question == 'أحجز إزاي؟'))
+    missing_page = db.scalar(select(SitePage).where(SitePage.slug == 'honors'))
+    assert hours is not None and phone is not None and home_page is not None and booking is not None and missing_page is not None
+    original_hours = hours.value
+    original_phone = phone.value
+    original_page = (home_page.title, home_page.path)
+    original_booking = booking.answer
+    db.delete(phone)
+    db.delete(missing_page)
+    hours.value = 'مواعيد معدلة من الأدمن'
+    home_page.title = 'عنوان رئيسية مخصص من الأدمن'
+    home_page.path = '/admin-configured-home'
+    booking.answer = 'معلومة الحجز المعدلة من الأدمن'
+    db.commit()
+
+    try:
+        run_seed()
+        db.expire_all()
+        settings = client.get('/api/v1/site-settings').json()
+        navigation = client.get('/api/v1/navigation').json()
+        assert settings['center_hours'] == 'مواعيد معدلة من الأدمن'
+        assert settings['secondary_phone'] == original_phone
+        assert navigation
+        assert any(page['slug'] == 'honors' for page in navigation)
+        assert any(
+            page['slug'] == 'home'
+            and page['title'] == 'عنوان رئيسية مخصص من الأدمن'
+            and page['path'] == '/admin-configured-home'
+            for page in navigation
+        )
+
+        headers = student_headers()
+        hours_response = client.post(
+            '/api/v1/assistant/chat',
+            headers=headers,
+            json={'message': 'مواعيد السنتر إيه؟'},
+        )
+        booking_response = client.post(
+            '/api/v1/assistant/chat',
+            headers=headers,
+            json={'message': 'إزاي أحجز؟'},
+        )
+        assert hours_response.json()['answer'] == 'مواعيد معدلة من الأدمن'
+        assert booking_response.json()['answer'] == 'معلومة الحجز المعدلة من الأدمن'
+    finally:
+        db.expire_all()
+        hours = db.get(SiteSetting, 'center_hours')
+        phone = db.get(SiteSetting, 'secondary_phone')
+        home_page = db.scalar(select(SitePage).where(SitePage.slug == 'home'))
+        booking = db.scalar(select(ChatKnowledge).where(ChatKnowledge.question == 'أحجز إزاي؟'))
+        if hours:
+            hours.value = original_hours
+        if phone:
+            phone.value = original_phone
+        if home_page:
+            home_page.title, home_page.path = original_page
+        if booking:
+            booking.answer = original_booking
+        db.commit()
+        run_seed()
+        db.close()
+
+
 def test_student_full_quiz_flow():
     h = student_headers()
     start=client.post('/api/v1/quizzes/english-placement-50/start',headers=h)
@@ -215,6 +283,7 @@ def test_assistant_sends_educational_questions_to_gemini(monkeypatch):
     monkeypatch.setattr(assistant_router.httpx, "post", fake_gemini_request)
     questions = (
         "معنى كلمة beautiful",
+        "يعني اي beautiful؟",
         "اشرحلي Present Perfect",
         "صحح الجملة I goes to school",
     )
@@ -230,7 +299,7 @@ def test_assistant_sends_educational_questions_to_gemini(monkeypatch):
         assert "key" not in kwargs.get("params", {})
         assert kwargs["timeout"] == 12.0
     assert "معناها بالعربية" in calls[0][1]["json"]["systemInstruction"]["parts"][0]["text"]
-    assert "اشرح القاعدة" in calls[1][1]["json"]["systemInstruction"]["parts"][0]["text"]
+    assert "اشرح القاعدة" in calls[2][1]["json"]["systemInstruction"]["parts"][0]["text"]
 
 
 def test_assistant_quick_prompts_ask_for_clarification_then_use_gemini(monkeypatch):

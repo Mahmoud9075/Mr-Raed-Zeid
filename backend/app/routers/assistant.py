@@ -214,6 +214,7 @@ def _gemini_answer(
     settings = get_settings()
     api_key = settings.gemini_api_key.strip()
     if not api_key:
+        logger.warning("Gemini API key is not configured")
         return None
     if not api_key.isascii():
         logger.warning("Gemini API key contains non-ASCII characters; request was not sent")
@@ -276,8 +277,17 @@ def _gemini_answer(
             logger.warning("Gemini returned an empty answer")
             return None
         return text.strip()
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("Gemini request failed (%s)", type(exc).__name__)
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Gemini request failed with HTTP status %s", exc.response.status_code)
+        return None
+    except httpx.TimeoutException:
+        logger.warning("Gemini request timed out")
+        return None
+    except httpx.RequestError as exc:
+        logger.warning("Gemini connection failed (%s)", type(exc).__name__)
+        return None
+    except ValueError:
+        logger.warning("Gemini returned an invalid response payload")
         return None
 
 

@@ -6,10 +6,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
 from .config import get_settings
-from .db import Base, SessionLocal, engine
-from .seed import run_quiz_seed
+from .seed import run_seed
 from .routers import auth, quizzes, reviews, public, admin, notifications, assistant, search
 
 settings = get_settings()
@@ -19,11 +17,7 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.validate_production()
-    with engine.begin() as conn:
-        if engine.dialect.name == "postgresql":
-            conn.execute(text("SELECT pg_advisory_xact_lock(987654321)"))
-        Base.metadata.create_all(bind=conn)
-    run_quiz_seed()
+    run_seed()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     yield
 

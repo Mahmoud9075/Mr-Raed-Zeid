@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     upload_dir: str = str(DEFAULT_UPLOAD_DIR)
     max_upload_mb: int = 5
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-2.5-flash"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
