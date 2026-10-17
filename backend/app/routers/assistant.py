@@ -117,6 +117,23 @@ def _best_knowledge(message: str, rows: list[ChatKnowledge]) -> ChatKnowledge | 
     return best[1] if best and best[0] >= 16 else None
 
 
+def _safe_gemini_error_message(response: httpx.Response, api_key: str) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return "Google returned a non-JSON error response"
+    if not isinstance(payload, dict):
+        return "Google returned an invalid error response"
+    error = payload.get("error")
+    message = error.get("message") if isinstance(error, dict) else None
+    if not isinstance(message, str) or not message.strip():
+        return "Google did not provide an error message"
+    if api_key:
+        message = message.replace(api_key, "[REDACTED]")
+    message = re.sub(r"\bAIza[0-9A-Za-z_-]{20,}\b", "[REDACTED]", message)
+    return " ".join(message.split())[:500]
+
+
 def _latest_result(db: Session, user: User | None) -> str | None:
     if not user:
         return None
@@ -278,7 +295,12 @@ def _gemini_answer(
             return None
         return text.strip()
     except httpx.HTTPStatusError as exc:
-        logger.warning("Gemini request failed with HTTP status %s", exc.response.status_code)
+        message = _safe_gemini_error_message(exc.response, api_key)
+        logger.warning(
+            "Gemini request failed with HTTP status %s: %s",
+            exc.response.status_code,
+            message,
+        )
         return None
     except httpx.TimeoutException:
         logger.warning("Gemini request timed out")

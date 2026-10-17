@@ -495,6 +495,40 @@ def test_assistant_handles_gemini_timeout_without_failing_request(monkeypatch):
     }
 
 
+def test_assistant_logs_safe_google_error_message(monkeypatch, caplog):
+    api_key = "test-api-key"
+    monkeypatch.setattr(
+        assistant_router,
+        "get_settings",
+        lambda: type("Settings", (), {"gemini_api_key": api_key, "gemini_model": "gemini-2.5-flash"})(),
+    )
+    monkeypatch.setattr(
+        assistant_router.httpx,
+        "post",
+        lambda *args, **kwargs: assistant_router.httpx.Response(
+            404,
+            json={
+                "error": {
+                    "message": f"models/gemini-2.5-flash not found; key={api_key}; API key=AIza012345678901234567890123456789012345"
+                }
+            },
+            request=assistant_router.httpx.Request(
+                "POST", "https://generativelanguage.googleapis.com"
+            ),
+        ),
+    )
+
+    with caplog.at_level("WARNING", logger=assistant_router.logger.name):
+        answer = assistant_router._gemini_answer("Explain Present Perfect")
+
+    assert answer is None
+    assert "HTTP status 404" in caplog.text
+    assert "models/gemini-2.5-flash not found" in caplog.text
+    assert api_key not in caplog.text
+    assert "AIza012345678901234567890123456789012345" not in caplog.text
+    assert "[REDACTED]" in caplog.text
+
+
 
 def test_quiz_resume_autosave_and_idempotent_submit():
     h = student_headers()
