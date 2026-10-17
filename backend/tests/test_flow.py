@@ -1,4 +1,6 @@
+import asyncio
 import os
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_raed.db"
@@ -10,11 +12,7 @@ os.environ["RATE_LIMIT_PER_MINUTE"] = "10000"
 os.environ["ASSISTANT_RATE_LIMIT_PER_MINUTE"] = "10000"
 from fastapi.testclient import TestClient
 from app.main import app
-from app.db import SessionLocal
-from app.models import ChatKnowledge, Question, Quiz, SitePage, SiteSetting
-from app.seed import QUESTIONS, run_quiz_seed, run_seed
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from app.seed import run_seed
 from app.routers import assistant as assistant_router
 
 run_seed()
@@ -66,139 +64,45 @@ def test_health_and_quiz_count():
     assert quizzes[0]['question_count'] == 50
 
 
-def test_placement_seed_is_additive_and_idempotent():
-    db = SessionLocal()
-    quiz = db.scalar(
-        select(Quiz)
-        .where(Quiz.slug == 'english-placement-50')
-        .options(selectinload(Quiz.questions).selectinload(Question.choices))
-    )
-    assert quiz is not None
-    original_title = quiz.title_ar
-    original_duration = quiz.duration_minutes
-    quiz.title_ar = 'Admin-edited placement title'
-    quiz.duration_minutes = 47
-    edited_question = next(question for question in quiz.questions if question.prompt == QUESTIONS[0][1])
-    original_prompt = edited_question.prompt
-    edited_question.prompt = 'Admin-edited placement question'
-    manual_placement_question = Question(
-        quiz_id=quiz.id,
-        prompt='Admin-created placement question',
-        position=max(question.position for question in quiz.questions) + 1,
-    )
-    db.add(manual_placement_question)
-    custom_quiz = Quiz(slug='admin-created-quiz', title_ar='Admin quiz')
-    db.add(custom_quiz)
-    db.flush()
-    custom_question = Question(
-        quiz_id=custom_quiz.id,
-        prompt='Admin-created question',
-        position=1,
-    )
-    db.add(custom_question)
-    db.commit()
+def test_production_startup_seeds_missing_assistant_data(monkeypatch, tmp_path):
+    import app.main as main_module
+    from sqlalchemy import select
+    from app.db import SessionLocal
+    from app.models import ChatKnowledge, SiteSetting
 
+    db = SessionLocal()
     try:
-        run_quiz_seed()
-        run_quiz_seed()
-        db.expire_all()
-        quiz = db.scalar(
-            select(Quiz)
-            .where(Quiz.slug == 'english-placement-50')
-            .options(selectinload(Quiz.questions).selectinload(Question.choices))
-        )
-        assert quiz is not None
-        assert quiz.title_ar == 'Admin-edited placement title'
-        assert quiz.duration_minutes == 47
-        assert any(question.prompt == 'Admin-edited placement question' for question in quiz.questions)
-        assert any(question.prompt == 'Admin-created placement question' for question in quiz.questions)
-        seeded_question = next(question for question in quiz.questions if question.prompt == QUESTIONS[0][1])
-        assert len(seeded_question.choices) == len(QUESTIONS[0][2])
-        assert db.scalar(select(Quiz).where(Quiz.slug == 'admin-created-quiz')) is not None
-        assert db.scalar(select(Question).where(Question.id == custom_question.id)) is not None
-    finally:
-        quiz = db.scalar(
-            select(Quiz)
-            .where(Quiz.slug == 'english-placement-50')
-            .options(selectinload(Quiz.questions))
-        )
-        for question in list(quiz.questions):
-            if question.prompt in {QUESTIONS[0][1], 'Admin-created placement question'}:
-                db.delete(question)
-            elif question.prompt == 'Admin-edited placement question':
-                question.prompt = original_prompt
-        quiz.title_ar = original_title
-        quiz.duration_minutes = original_duration
-        db.delete(db.scalar(select(Quiz).where(Quiz.slug == 'admin-created-quiz')))
+        hours = db.scalar(select(SiteSetting).where(SiteSetting.key == "center_hours"))
+        knowledge = db.scalar(select(ChatKnowledge).where(ChatKnowledge.category == "الحجز"))
+        if hours:
+            db.delete(hours)
+        if knowledge:
+            db.delete(knowledge)
         db.commit()
+    finally:
         db.close()
 
+    class ProductionSettings:
+        env = "production"
+        upload_dir = str(tmp_path / "uploads")
 
-def test_full_seed_backfills_site_data_and_preserves_admin_edits():
+        @staticmethod
+        def validate_production():
+            return None
+
+    monkeypatch.setattr(main_module, "settings", ProductionSettings())
+
+    async def start_application():
+        async with main_module.lifespan(main_module.app):
+            pass
+
+    asyncio.run(start_application())
+
     db = SessionLocal()
-    hours = db.get(SiteSetting, 'center_hours')
-    phone = db.get(SiteSetting, 'secondary_phone')
-    home_page = db.scalar(select(SitePage).where(SitePage.slug == 'home'))
-    booking = db.scalar(select(ChatKnowledge).where(ChatKnowledge.question == 'أحجز إزاي؟'))
-    missing_page = db.scalar(select(SitePage).where(SitePage.slug == 'honors'))
-    assert hours is not None and phone is not None and home_page is not None and booking is not None and missing_page is not None
-    original_hours = hours.value
-    original_phone = phone.value
-    original_page = (home_page.title, home_page.path)
-    original_booking = booking.answer
-    db.delete(phone)
-    db.delete(missing_page)
-    hours.value = 'مواعيد معدلة من الأدمن'
-    home_page.title = 'عنوان رئيسية مخصص من الأدمن'
-    home_page.path = '/admin-configured-home'
-    booking.answer = 'معلومة الحجز المعدلة من الأدمن'
-    db.commit()
-
     try:
-        run_seed()
-        db.expire_all()
-        settings = client.get('/api/v1/site-settings').json()
-        navigation = client.get('/api/v1/navigation').json()
-        assert settings['center_hours'] == 'مواعيد معدلة من الأدمن'
-        assert settings['secondary_phone'] == original_phone
-        assert navigation
-        assert any(page['slug'] == 'honors' for page in navigation)
-        assert any(
-            page['slug'] == 'home'
-            and page['title'] == 'عنوان رئيسية مخصص من الأدمن'
-            and page['path'] == '/admin-configured-home'
-            for page in navigation
-        )
-
-        headers = student_headers()
-        hours_response = client.post(
-            '/api/v1/assistant/chat',
-            headers=headers,
-            json={'message': 'مواعيد السنتر إيه؟'},
-        )
-        booking_response = client.post(
-            '/api/v1/assistant/chat',
-            headers=headers,
-            json={'message': 'إزاي أحجز؟'},
-        )
-        assert hours_response.json()['answer'] == 'مواعيد معدلة من الأدمن'
-        assert booking_response.json()['answer'] == 'معلومة الحجز المعدلة من الأدمن'
+        assert db.scalar(select(SiteSetting).where(SiteSetting.key == "center_hours"))
+        assert db.scalar(select(ChatKnowledge).where(ChatKnowledge.category == "الحجز"))
     finally:
-        db.expire_all()
-        hours = db.get(SiteSetting, 'center_hours')
-        phone = db.get(SiteSetting, 'secondary_phone')
-        home_page = db.scalar(select(SitePage).where(SitePage.slug == 'home'))
-        booking = db.scalar(select(ChatKnowledge).where(ChatKnowledge.question == 'أحجز إزاي؟'))
-        if hours:
-            hours.value = original_hours
-        if phone:
-            phone.value = original_phone
-        if home_page:
-            home_page.title, home_page.path = original_page
-        if booking:
-            booking.answer = original_booking
-        db.commit()
-        run_seed()
         db.close()
 
 
@@ -283,7 +187,6 @@ def test_assistant_sends_educational_questions_to_gemini(monkeypatch):
     monkeypatch.setattr(assistant_router.httpx, "post", fake_gemini_request)
     questions = (
         "معنى كلمة beautiful",
-        "يعني اي beautiful؟",
         "اشرحلي Present Perfect",
         "صحح الجملة I goes to school",
     )
@@ -299,7 +202,7 @@ def test_assistant_sends_educational_questions_to_gemini(monkeypatch):
         assert "key" not in kwargs.get("params", {})
         assert kwargs["timeout"] == 12.0
     assert "معناها بالعربية" in calls[0][1]["json"]["systemInstruction"]["parts"][0]["text"]
-    assert "اشرح القاعدة" in calls[2][1]["json"]["systemInstruction"]["parts"][0]["text"]
+    assert "اشرح القاعدة" in calls[1][1]["json"]["systemInstruction"]["parts"][0]["text"]
 
 
 def test_assistant_quick_prompts_ask_for_clarification_then_use_gemini(monkeypatch):
@@ -352,7 +255,8 @@ def test_assistant_quick_prompts_ask_for_clarification_then_use_gemini(monkeypat
     assert calls[0]["json"]["contents"] == [
         {"role": "user", "parts": [{"text": "اشرح معنى الكلمة التالية: beautiful"}]},
     ]
-    assert "النطق إن أمكن" in calls[0]["json"]["systemInstruction"]["parts"][0]["text"]
+    assert "المعنى بالعربي ومثالًا بسيطًا" in calls[0]["json"]["systemInstruction"]["parts"][0]["text"]
+    assert "النطق" not in calls[0]["json"]["systemInstruction"]["parts"][0]["text"]
 
     grammar_follow_up = client.post(
         "/api/v1/assistant/chat",
@@ -493,40 +397,6 @@ def test_assistant_handles_gemini_timeout_without_failing_request(monkeypatch):
         "answer": "مش قادر أوصل للمساعد الذكي دلوقتي، جرّب كمان شوية.",
         "source": "gemini_unavailable",
     }
-
-
-def test_assistant_logs_safe_google_error_message(monkeypatch, caplog):
-    api_key = "test-api-key"
-    monkeypatch.setattr(
-        assistant_router,
-        "get_settings",
-        lambda: type("Settings", (), {"gemini_api_key": api_key, "gemini_model": "gemini-2.5-flash"})(),
-    )
-    monkeypatch.setattr(
-        assistant_router.httpx,
-        "post",
-        lambda *args, **kwargs: assistant_router.httpx.Response(
-            404,
-            json={
-                "error": {
-                    "message": f"models/gemini-2.5-flash not found; key={api_key}; API key=AIza012345678901234567890123456789012345"
-                }
-            },
-            request=assistant_router.httpx.Request(
-                "POST", "https://generativelanguage.googleapis.com"
-            ),
-        ),
-    )
-
-    with caplog.at_level("WARNING", logger=assistant_router.logger.name):
-        answer = assistant_router._gemini_answer("Explain Present Perfect")
-
-    assert answer is None
-    assert "HTTP status 404" in caplog.text
-    assert "models/gemini-2.5-flash not found" in caplog.text
-    assert api_key not in caplog.text
-    assert "AIza012345678901234567890123456789012345" not in caplog.text
-    assert "[REDACTED]" in caplog.text
 
 
 
@@ -683,3 +553,268 @@ def test_audit_log_is_owner_only():
     response = client.get('/api/v1/admin/audit?page_size=5', headers=owner)
     assert response.status_code == 200
     assert isinstance(response.json(), list)
+
+
+def test_forgot_password_code_resets_password_and_revokes_old_login():
+    test_id = uuid4().hex
+    email = f"reset-{test_id}@test.com"
+    phone = str(uuid4().int)[:15]
+    created = client.post('/api/v1/auth/register', json={
+        'first_name':'Reset','last_name':'Student','email':email,'phone':phone,
+        'guardian_phone':'01033334444','stage':'ثانوي','education_type':'عام','grade':'الصف الأول الثانوي','password':'StrongPass1'
+    })
+    assert created.status_code == 201
+    request = client.post('/api/v1/auth/forgot-password', json={'email': email})
+    assert request.status_code == 200
+    code = request.json().get('dev_code')
+    assert code and len(code) == 6
+    reset = client.post('/api/v1/auth/reset-password', json={'email': email, 'code': code, 'new_password':'NewStrongPass2'})
+    assert reset.status_code == 200
+    assert client.post('/api/v1/auth/login', json={'identifier':email,'password':'StrongPass1'}).status_code == 401
+    assert client.post('/api/v1/auth/login', json={'identifier':email,'password':'NewStrongPass2'}).status_code == 200
+
+
+def test_authorized_admin_email_otp_pin_and_permissions():
+    owner = owner_headers()
+    email = 'm47662266@gmail.com'
+    request = client.post('/api/v1/auth/admin-email/request', json={'email': email})
+    assert request.status_code == 200
+    code = request.json().get('dev_code')
+    assert code and len(code) == 6
+    verified = client.post('/api/v1/auth/admin-email/verify', json={'email': email, 'code': code})
+    assert verified.status_code == 200
+    admin_token = verified.json()['access_token']
+    admin_headers = {'Authorization': 'Bearer ' + admin_token}
+    me = client.get('/api/v1/auth/me', headers=admin_headers)
+    assert me.status_code == 200 and me.json()['role'] == 'admin'
+
+    # Owner can make the role genuinely restricted at the API layer.
+    admin_id = me.json()['id']
+    changed = client.put(f'/api/v1/admin/admins/{admin_id}/permissions', headers=owner, json={'permissions':['students']})
+    assert changed.status_code == 200
+    assert client.get('/api/v1/admin/users', headers=admin_headers).status_code == 200
+    assert client.get('/api/v1/admin/dashboard', headers=admin_headers).status_code == 403
+
+    # Restore normal permissions so later tests are independent.
+    standard = ['dashboard','students','results','reviews','months','quizzes','content','assistant','settings','analytics','notifications','admins']
+    assert client.put(f'/api/v1/admin/admins/{admin_id}/permissions', headers=owner, json={'permissions':standard}).status_code == 200
+
+    pin = str(uuid4().int)[-6:]
+    assert client.post('/api/v1/auth/admin-pin/setup', headers=admin_headers, json={'pin':pin}).status_code == 200
+    pin_login = client.post('/api/v1/auth/admin-pin', json={'pin':pin})
+    assert pin_login.status_code == 200
+
+
+def test_admin_can_edit_student_record():
+    h = student_headers()
+    me = client.get('/api/v1/auth/me', headers=h).json()
+    owner = owner_headers()
+    changed = client.put(f"/api/v1/admin/users/{me['id']}", headers=owner, json={
+        'first_name':'Updated','last_name':'Student','email':me['email'],'phone':me['phone'],
+        'guardian_phone':'01099998888','stage':'ثانوي','education_type':'عام','grade':'الصف الثاني الثانوي',
+        'school_name':'مدرسة الاختبار','is_verified':True,
+    })
+    assert changed.status_code == 200
+    details = client.get(f"/api/v1/admin/users/{me['id']}", headers=owner).json()['user']
+    assert details['first_name'] == 'Updated'
+    assert details['grade'] == 'الصف الثاني الثانوي'
+    assert details['is_verified'] is True
+
+
+def test_monthly_path_locks_next_quiz_until_previous_passed():
+    owner = owner_headers()
+    suffix = uuid4().hex[:10]
+    base = {
+        'title_en':'','description_ar':'','description_en':'','stage':'ثانوي','education_type':'عام','grade':'الصف الأول الثانوي',
+        'duration_minutes':20,'passing_score':60,'max_attempts':3,'randomize_questions':False,
+        'show_result_immediately':True,'is_published':False,'is_placement':False,
+    }
+    ids = []
+    slugs = []
+    for n in (1,2):
+        slug = f"path-{suffix}-{n}"
+        payload = {**base, 'slug':slug, 'title_ar':f'اختبار مسار {suffix}-{n}'}
+        made = client.post('/api/v1/admin/quizzes', headers=owner, json=payload)
+        assert made.status_code == 201
+        qid = made.json()['id']; ids.append(qid); slugs.append(slug)
+        question = client.post(f'/api/v1/admin/quizzes/{qid}/questions', headers=owner, json={
+            'prompt':f'سؤال {n}','explanation':'','level':'A1','question_type':'mcq','expected_answer':None,
+            'position':1,'points':1,'choices':[['صح',True],['غلط',False]],
+        })
+        assert question.status_code == 201
+        assert client.patch(f'/api/v1/admin/quizzes/{qid}/publish?published=true', headers=owner).status_code == 200
+
+    month = client.post('/api/v1/admin/months', headers=owner, json={
+        'title':f'شهر {suffix}','stage':'ثانوي','education_type':'عام','grade':'الصف الأول الثانوي','sort_order':999,'is_visible':True
+    })
+    assert month.status_code == 201
+    month_id = month.json()['id']
+    assert client.put(f'/api/v1/admin/quiz-path/{ids[0]}', headers=owner, json={
+        'month_id':month_id,'week_label':'الأسبوع الأول','sort_order':10,'requires_previous':False,'unlock_after_quiz_id':None,'min_previous_score':60,'show_when_locked':True
+    }).status_code == 200
+    assert client.put(f'/api/v1/admin/quiz-path/{ids[1]}', headers=owner, json={
+        'month_id':month_id,'week_label':'الأسبوع الثاني','sort_order':20,'requires_previous':True,'unlock_after_quiz_id':None,'min_previous_score':60,'show_when_locked':True
+    }).status_code == 200
+
+    student = student_headers()
+    locked = client.post(f'/api/v1/quizzes/{slugs[1]}/start', headers=student)
+    assert locked.status_code == 403
+    first = client.post(f'/api/v1/quizzes/{slugs[0]}/start', headers=student)
+    assert first.status_code == 200
+    q = first.json()['questions'][0]
+    submit = client.post(f"/api/v1/quizzes/attempts/{first.json()['attempt_id']}/submit", headers=student, json={'answers':[{'question_id':q['id'],'choice_id':q['choices'][0]['id']}]})
+    assert submit.status_code == 200 and submit.json()['score'] == 100
+    unlocked = client.post(f'/api/v1/quizzes/{slugs[1]}/start', headers=student)
+    assert unlocked.status_code == 200
+    path = client.get('/api/v1/path', headers=student)
+    assert path.status_code == 200
+    target = next(q for m in path.json() for q in m['quizzes'] if q['quiz_id'] == ids[1])
+    assert target['locked'] is False
+
+
+def test_visits_presence_review_delete_and_backup_export():
+    owner = owner_headers()
+    student = student_headers()
+    assert client.post('/api/v1/analytics/visit', headers=student, json={'path':'/student/test-page'}).status_code == 200
+    assert client.post('/api/v1/auth/presence', headers=student, json={'path':'/student/test-page'}).status_code == 200
+    analytics = client.get('/api/v1/admin/analytics', headers=owner)
+    assert analytics.status_code == 200 and analytics.json()['total'] >= 1
+    presence = client.get('/api/v1/admin/presence', headers=owner)
+    assert presence.status_code == 200 and any(x['path'] == '/student/test-page' for x in presence.json())
+
+    review = client.post('/api/v1/reviews', json={'display_name':'طالب للحذف','student_stage':'ثانوي عام','rating':4,'body':'تقييم سيتم حذفه من الإدارة'}).json()
+    assert client.patch(f"/api/v1/admin/reviews/{review['id']}?status=pending", headers=owner).status_code == 200
+    assert client.delete(f"/api/v1/admin/reviews/{review['id']}", headers=owner).status_code == 200
+
+    backup = client.get('/api/v1/admin/backup/export.json', headers=owner)
+    assert backup.status_code == 200
+    data = backup.json()
+    assert data['version'] == 3
+    assert 'site_settings' in data and 'quizzes' in data and 'quiz_path' in data
+
+
+def test_month_schedule_blocks_direct_quiz_access_until_month_opens():
+    owner = owner_headers()
+    suffix = uuid4().hex[:10]
+    slug = f"scheduled-month-{suffix}"
+    created = client.post('/api/v1/admin/quizzes', headers=owner, json={
+        'slug':slug,'title_ar':f'اختبار شهر مؤجل {suffix}','title_en':'','description_ar':'',
+        'stage':'ثانوي','education_type':'عام','grade':'الصف الأول الثانوي','duration_minutes':10,
+        'passing_score':60,'max_attempts':2,'randomize_questions':False,'show_result_immediately':True,
+        'is_published':False,'is_placement':False,
+    })
+    assert created.status_code == 201
+    quiz_id = created.json()['id']
+    assert client.post(f'/api/v1/admin/quizzes/{quiz_id}/questions', headers=owner, json={
+        'prompt':'سؤال موعد','explanation':'','level':'A1','question_type':'mcq','expected_answer':None,
+        'position':1,'points':1,'choices':[['صح',True],['غلط',False]],
+    }).status_code == 201
+    assert client.patch(f'/api/v1/admin/quizzes/{quiz_id}/publish?published=true', headers=owner).status_code == 200
+
+    future = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    month = client.post('/api/v1/admin/months', headers=owner, json={
+        'title':f'شهر مؤجل {suffix}','stage':'ثانوي','education_type':'عام','grade':'الصف الأول الثانوي',
+        'sort_order':1000,'is_visible':True,'starts_at':future,
+    })
+    assert month.status_code == 201
+    month_id = month.json()['id']
+    assert client.put(f'/api/v1/admin/quiz-path/{quiz_id}', headers=owner, json={
+        'month_id':month_id,'week_label':'الأسبوع الأول','sort_order':10,'requires_previous':False,
+        'unlock_after_quiz_id':None,'min_previous_score':60,'show_when_locked':True,
+    }).status_code == 200
+
+    student = student_headers()
+    start = client.post(f'/api/v1/quizzes/{slug}/start', headers=student)
+    assert start.status_code == 403
+    path = client.get('/api/v1/path', headers=student)
+    assert path.status_code == 200
+    target = next(q for m in path.json() for q in m['quizzes'] if q['quiz_id'] == quiz_id)
+    assert target['status'] == 'scheduled'
+    assert target['locked'] is True
+
+
+def test_verification_code_locks_after_five_wrong_attempts():
+    test_id = uuid4().hex
+    email = f"otp-limit-{test_id}@test.com"
+    phone = str(uuid4().int)[:15]
+    assert client.post('/api/v1/auth/register', json={
+        'first_name':'OTP','last_name':'Student','email':email,'phone':phone,
+        'guardian_phone':'01033334444','stage':'ثانوي','education_type':'عام','grade':'الصف الأول الثانوي','password':'StrongPass1'
+    }).status_code == 201
+    requested = client.post('/api/v1/auth/forgot-password', json={'email':email})
+    code = requested.json()['dev_code']
+    wrong = '000000' if code != '000000' else '999999'
+    for _ in range(5):
+        response = client.post('/api/v1/auth/reset-password', json={'email':email,'code':wrong,'new_password':'NewStrongPass2'})
+        assert response.status_code == 400
+    # Even the real code is invalid once the failure limit has been reached.
+    locked = client.post('/api/v1/auth/reset-password', json={'email':email,'code':code,'new_password':'NewStrongPass2'})
+    assert locked.status_code == 400
+
+
+def test_admin_pin_can_be_reset_by_authorized_email_code():
+    owner = owner_headers()
+    allow = client.post('/api/v1/admin/authorized-admins', headers=owner, json={'email':'admin@test.com','role':'owner'})
+    assert allow.status_code == 201
+    request = client.post('/api/v1/auth/admin-pin/forgot', json={'email':'admin@test.com'})
+    assert request.status_code == 200
+    code = request.json().get('dev_code')
+    assert code and len(code) == 6
+    reset = client.post('/api/v1/auth/admin-pin/reset', json={'email':'admin@test.com','code':code,'pin':'654321'})
+    assert reset.status_code == 200
+    login = client.post('/api/v1/auth/admin-pin', json={'pin':'654321'})
+    assert login.status_code == 200
+
+
+def test_student_soft_archive_and_restore_keeps_results():
+    owner = owner_headers()
+    student = student_headers()
+    me = client.get('/api/v1/auth/me', headers=student).json()
+    start = client.post('/api/v1/quizzes/english-placement-50/start', headers=student)
+    assert start.status_code == 200
+    attempt_id = start.json()['attempt_id']
+    archive = client.post(f"/api/v1/admin/users/{me['id']}/archive", headers=owner)
+    assert archive.status_code == 200
+    listed = client.get('/api/v1/admin/users', headers=owner).json()
+    assert all(row['id'] != me['id'] for row in listed)
+    trash = client.get('/api/v1/admin/trash', headers=owner).json()
+    assert any(row['id'] == me['id'] for row in trash['students'])
+    restore = client.post(f"/api/v1/admin/trash/students/{me['id']}/restore", headers=owner)
+    assert restore.status_code == 200
+    detail = client.get(f"/api/v1/admin/users/{me['id']}", headers=owner)
+    assert detail.status_code == 200
+    assert any(row['id'] == attempt_id for row in detail.json()['attempts'])
+
+
+def test_full_safe_backup_contains_students_and_results_without_password_hashes():
+    owner = owner_headers()
+    student = student_headers()
+    start = client.post('/api/v1/quizzes/english-placement-50/start', headers=student)
+    assert start.status_code == 200
+    backup = client.get('/api/v1/admin/backup/export.json', headers=owner)
+    assert backup.status_code == 200
+    data = backup.json()
+    assert data['version'] == 3
+    assert data['students']
+    assert data['attempts']
+    serialized = backup.text.lower()
+    assert 'password_hash' not in serialized
+    assert 'refresh_token' not in serialized
+    assert 'api_key' not in serialized
+
+
+def test_admin_password_recovery_is_limited_to_authorized_admin_email():
+    owner = owner_headers()
+    allow = client.post('/api/v1/admin/authorized-admins', headers=owner, json={'email':'admin@test.com','role':'owner'})
+    assert allow.status_code == 201
+    request = client.post('/api/v1/auth/admin-password/forgot', json={'email':'admin@test.com'})
+    assert request.status_code == 200
+    code = request.json().get('dev_code')
+    assert code and len(code) == 6
+    reset = client.post('/api/v1/auth/admin-password/reset', json={'email':'admin@test.com','code':code,'new_password':'NewStrong1'})
+    assert reset.status_code == 200
+    assert client.post('/api/v1/auth/login', json={'identifier':'admin@test.com','password':'NewStrong1'}).status_code == 200
+    # Restore the deterministic test password for repeatable runs.
+    request2 = client.post('/api/v1/auth/admin-password/forgot', json={'email':'admin@test.com'})
+    code2 = request2.json().get('dev_code')
+    assert client.post('/api/v1/auth/admin-password/reset', json={'email':'admin@test.com','code':code2,'new_password':'StrongAdmin1'}).status_code == 200

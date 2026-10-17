@@ -17,6 +17,7 @@ from ..schemas import (
     SavedAnswerOut,
 )
 from ..deps import current_user
+from ..path_service import assert_path_access
 
 router = APIRouter(prefix="/quizzes", tags=["quizzes"])
 
@@ -234,6 +235,7 @@ def start_quiz(slug: str, db: Session = Depends(get_db), user: User = Depends(cu
         raise HTTPException(404, "الاختبار غير موجود")
     now = datetime.now(timezone.utc)
     _quiz_allowed(quiz, user, now)
+    assert_path_access(db, user, quiz)
 
     active = db.scalar(
         select(QuizAttempt)

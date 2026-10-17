@@ -2,10 +2,10 @@
 
 ## Frontend Vercel environment variables
 
-- `NEXT_PUBLIC_API_URL=https://<your-backend-domain>/api/v1`
-- Optional server-side override: `API_INTERNAL_URL=https://<your-backend-domain>/api/v1`
+- Required: `API_INTERNAL_URL=https://<your-backend-domain>/api/v1` in the Vercel project's Production environment (and Preview if used).
+- `NEXT_PUBLIC_API_URL` is not required: browser requests use the same-origin `/api/v1` path.
 
-The browser calls `/api/v1/*` on the frontend origin and Next.js proxies those requests to the configured backend. This keeps browser requests same-origin and reduces CORS/cookie issues.
+The browser calls `/api/v1/*` on the frontend origin and Next.js proxies those requests to `API_INTERNAL_URL`. This value is used by the Next.js rewrite configuration; the default points to localhost and will not work on Vercel. Redeploy after changing it.
 
 ## Backend environment variables
 
@@ -22,6 +22,8 @@ Optional Gemini:
 
 - `GEMINI_API_KEY=<Gemini API key>`
 - `GEMINI_MODEL=gemini-3.8-flash`
+
+On startup, a production backend seeds missing default site settings and assistant knowledge into the configured `DATABASE_URL`. Seeding is idempotent and preserves existing admin-edited knowledge and site settings. The database must be reachable, and the required `ADMIN_EMAIL` and `ADMIN_PASSWORD` must be configured.
 
 Optional SMTP / admin OTP:
 

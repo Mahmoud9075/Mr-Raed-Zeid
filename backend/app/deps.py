@@ -1,8 +1,11 @@
+import json
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from .db import get_db
-from .models import User
+from .models import AdminSecurity, User
 from .security import decode_token
 
 bearer = HTTPBearer(auto_error=False)
@@ -53,3 +56,27 @@ def owner_user(user: User = Depends(current_user)) -> User:
     if user.role != "owner":
         raise HTTPException(status_code=403, detail="صلاحية المالك مطلوبة")
     return user
+
+
+STANDARD_ADMIN_PERMISSIONS = {
+    "dashboard", "students", "results", "reviews", "months", "quizzes", "content",
+    "assistant", "settings", "analytics", "notifications", "admins",
+}
+
+def permission_required(permission: str):
+    def dependency(user: User = Depends(admin_user), db: Session = Depends(get_db)) -> User:
+        if user.role == "owner":
+            return user
+        security = db.scalar(select(AdminSecurity).where(AdminSecurity.user_id == user.id))
+        if not security or not getattr(security, "permissions_customized", False):
+            allowed = STANDARD_ADMIN_PERMISSIONS
+        else:
+            try:
+                values = json.loads(security.permissions_json or "[]")
+            except Exception:
+                values = []
+            allowed = {str(value) for value in values}
+        if permission not in allowed:
+            raise HTTPException(status_code=403, detail="معندكش صلاحية للجزء ده من لوحة الإدارة")
+        return user
+    return dependency

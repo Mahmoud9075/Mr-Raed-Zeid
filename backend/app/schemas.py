@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -59,6 +60,8 @@ class UserOut(BaseModel):
     profile_image: str | None = None
     role: str
     is_active: bool = True
+    is_verified: bool = False
+    created_at: datetime | None = None
     model_config = {"from_attributes": True}
 
 
@@ -186,6 +189,8 @@ class QuizCreateIn(BaseModel):
     max_attempts: int = Field(default=2, ge=1, le=20)
     randomize_questions: bool = False
     show_result_immediately: bool = True
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
     is_published: bool = False
     is_placement: bool = False
 
@@ -296,3 +301,124 @@ class KnowledgeUpdateIn(BaseModel):
 
 class MessageStatusIn(BaseModel):
     status: Literal["new", "followed_up", "closed"]
+
+
+class AdminStudentUpdateIn(BaseModel):
+    first_name: str = Field(min_length=2, max_length=80)
+    last_name: str = Field(min_length=2, max_length=80)
+    email: EmailStr
+    phone: str = Field(min_length=8, max_length=32)
+    guardian_phone: str | None = Field(default=None, max_length=32)
+    stage: str | None = Field(default=None, max_length=80)
+    education_type: str | None = Field(default=None, max_length=80)
+    grade: str | None = Field(default=None, max_length=80)
+    school_name: str | None = Field(default=None, max_length=180)
+    is_verified: bool | None = None
+
+
+class ForgotPasswordIn(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordIn(BaseModel):
+    email: EmailStr
+    code: str = Field(pattern=r"^[0-9]{6}$")
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+class AdminEmailLoginRequestIn(BaseModel):
+    email: EmailStr
+
+
+class AdminEmailLoginVerifyIn(BaseModel):
+    email: EmailStr
+    code: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class AdminPinLoginIn(BaseModel):
+    pin: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class AdminPinSetIn(BaseModel):
+    pin: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class AdminPinResetRequestIn(BaseModel):
+    email: EmailStr
+
+
+class AdminPinResetIn(BaseModel):
+    email: EmailStr
+    code: str = Field(pattern=r"^[0-9]{6}$")
+    pin: str = Field(pattern=r"^[0-9]{6}$")
+
+
+class AuthorizedAdminIn(BaseModel):
+    email: EmailStr
+    role: str = "admin"
+
+    @field_validator("role")
+    @classmethod
+    def valid_role(cls, v):
+        if v not in {"admin", "owner"}:
+            raise ValueError("الصلاحية غير مدعومة")
+        return v
+
+
+class AdminPermissionsIn(BaseModel):
+    permissions: list[str] = Field(default_factory=list, max_length=50)
+
+
+class StudyMonthIn(BaseModel):
+    title: str = Field(min_length=2, max_length=160)
+    stage: str | None = Field(default=None, max_length=80)
+    education_type: str | None = Field(default=None, max_length=80)
+    grade: str | None = Field(default=None, max_length=80)
+    sort_order: int = Field(default=0, ge=-10000, le=10000)
+    is_visible: bool = True
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+
+class QuizPathConfigIn(BaseModel):
+    month_id: int | None = None
+    week_label: str | None = Field(default=None, max_length=80)
+    sort_order: int = Field(default=0, ge=-10000, le=10000)
+    requires_previous: bool = False
+    unlock_after_quiz_id: int | None = None
+    min_previous_score: int = Field(default=60, ge=0, le=100)
+    show_when_locked: bool = True
+
+
+class PageUpdateIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=180)
+    path: str | None = Field(default=None, min_length=1, max_length=220)
+    is_visible: bool | None = None
+    sort_order: int | None = Field(default=None, ge=-10000, le=10000)
+    content_json: str | None = Field(default=None, max_length=100000)
+
+
+class QuizUpdateIn(BaseModel):
+    title_ar: str | None = Field(default=None, min_length=2, max_length=200)
+    title_en: str | None = Field(default=None, max_length=200)
+    description_ar: str | None = Field(default=None, max_length=5000)
+    description_en: str | None = Field(default=None, max_length=5000)
+    stage: str | None = Field(default=None, max_length=80)
+    education_type: str | None = Field(default=None, max_length=80)
+    grade: str | None = Field(default=None, max_length=80)
+    duration_minutes: int | None = Field(default=None, ge=1, le=240)
+    passing_score: int | None = Field(default=None, ge=0, le=100)
+    max_attempts: int | None = Field(default=None, ge=1, le=20)
+    randomize_questions: bool | None = None
+    show_result_immediately: bool | None = None
+    is_published: bool | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+
+class PresencePingIn(BaseModel):
+    path: str = Field(default="/", min_length=1, max_length=220)
+
+
+class VisitIn(BaseModel):
+    path: str = Field(min_length=1, max_length=220)

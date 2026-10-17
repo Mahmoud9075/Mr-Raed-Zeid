@@ -6,9 +6,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from .config import get_settings
+from .db import Base, SessionLocal, engine
+from .routers import auth, auth_plus, quizzes, reviews, public, admin, admin_plus, notifications, assistant, search, path, analytics_public
 from .seed import run_seed
-from .routers import auth, quizzes, reviews, public, admin, notifications, assistant, search
 
 settings = get_settings()
 
@@ -17,7 +19,12 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings.validate_production()
-    run_seed()
+    with engine.begin() as conn:
+        if engine.dialect.name == "postgresql":
+            conn.execute(text("SELECT pg_advisory_xact_lock(987654321)"))
+        Base.metadata.create_all(bind=conn)
+    if settings.env == "production":
+        run_seed()
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     yield
 
@@ -115,5 +122,5 @@ def root():
     }
 
 
-for router in (public.router, auth.router, quizzes.router, reviews.router, admin.router, notifications.router, assistant.router, search.router):
+for router in (public.router, auth.router, auth_plus.router, quizzes.router, path.router, reviews.router, admin.router, admin_plus.router, notifications.router, assistant.router, search.router, analytics_public.router):
     app.include_router(router, prefix=settings.api_prefix)

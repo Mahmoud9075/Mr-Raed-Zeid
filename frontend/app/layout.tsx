@@ -3,7 +3,7 @@ import './globals.css';
 import SiteGate from '@/components/SiteGate';
 import FloatingTools from '@/components/FloatingTools';
 import MotionOrchestrator from '@/components/MotionOrchestrator';
-import ThemeInitializer from '@/components/ThemeInitializer';
+import RouteTracker from '@/components/RouteTracker';
 
 export const metadata: Metadata = {
   title: 'Mr. Raed Zeid | English Teacher',
@@ -19,9 +19,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
       <body>
-        <ThemeInitializer />
         <SiteGate>{children}</SiteGate>
         <MotionOrchestrator />
+        <RouteTracker />
         <FloatingTools />
       </body>
     </html>

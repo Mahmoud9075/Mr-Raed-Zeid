@@ -59,7 +59,7 @@
 ## GitHub / Vercel
 المشروع الحقيقي هو هذا المجلد نفسه؛ ارفع محتوياته من هذا الجذر ولا تنشئ مستوى مجلد إضافيًا بالخطأ. لا ترفع `.env` أو أي Secrets.
 
-للـFrontend على Vercel استخدم مجلد `frontend` كـ Root Directory واضبط `NEXT_PUBLIC_API_URL` على عنوان الـBackend المنتهي بـ `/api/v1`.
+للـFrontend على Vercel استخدم مجلد `frontend` كـ Root Directory واضبط `API_INTERNAL_URL` في إعدادات Production على عنوان الـBackend المنتهي بـ `/api/v1`، ثم أعد النشر. الواجهة تستخدم مسارًا من نفس النطاق `/api/v1`، وNext.js يمرر الطلبات إلى الـBackend؛ لا يكفي ضبط `NEXT_PUBLIC_API_URL`.
 
 راجع `DEPLOY_UPDATE.md` للتفاصيل.
 

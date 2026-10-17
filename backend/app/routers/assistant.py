@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from ..config import get_settings
 from ..db import get_db
 from ..deps import current_user
-from ..models import ChatKnowledge, Quiz, QuizAttempt, SiteSetting, User
+from ..models import ChatKnowledge, Quiz, QuizAttempt, SiteSetting, User, AssistantQueryLog
 from ..schemas import AssistantHistoryItem, AssistantMessageIn
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
@@ -117,23 +117,6 @@ def _best_knowledge(message: str, rows: list[ChatKnowledge]) -> ChatKnowledge | 
     return best[1] if best and best[0] >= 16 else None
 
 
-def _safe_gemini_error_message(response: httpx.Response, api_key: str) -> str:
-    try:
-        payload = response.json()
-    except ValueError:
-        return "Google returned a non-JSON error response"
-    if not isinstance(payload, dict):
-        return "Google returned an invalid error response"
-    error = payload.get("error")
-    message = error.get("message") if isinstance(error, dict) else None
-    if not isinstance(message, str) or not message.strip():
-        return "Google did not provide an error message"
-    if api_key:
-        message = message.replace(api_key, "[REDACTED]")
-    message = re.sub(r"\bAIza[0-9A-Za-z_-]{20,}\b", "[REDACTED]", message)
-    return " ".join(message.split())[:500]
-
-
 def _latest_result(db: Session, user: User | None) -> str | None:
     if not user:
         return None
@@ -231,7 +214,6 @@ def _gemini_answer(
     settings = get_settings()
     api_key = settings.gemini_api_key.strip()
     if not api_key:
-        logger.warning("Gemini API key is not configured")
         return None
     if not api_key.isascii():
         logger.warning("Gemini API key contains non-ASCII characters; request was not sent")
@@ -276,6 +258,18 @@ def _gemini_answer(
                 break
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code != 503 or attempt == 1:
+                    try:
+                        payload = exc.response.json() if exc.response is not None else {}
+                        error = payload.get("error", {}) if isinstance(payload, dict) else {}
+                        logger.warning(
+                            "Gemini HTTP error status=%s code=%s api_status=%s message=%s",
+                            exc.response.status_code if exc.response is not None else "unknown",
+                            error.get("code", ""),
+                            error.get("status", ""),
+                            str(error.get("message", ""))[:500],
+                        )
+                    except Exception:
+                        logger.warning("Gemini HTTP error status=%s", exc.response.status_code if exc.response is not None else "unknown")
                     raise
                 time.sleep(1)
         response.raise_for_status()
@@ -294,22 +288,8 @@ def _gemini_answer(
             logger.warning("Gemini returned an empty answer")
             return None
         return text.strip()
-    except httpx.HTTPStatusError as exc:
-        message = _safe_gemini_error_message(exc.response, api_key)
-        logger.warning(
-            "Gemini request failed with HTTP status %s: %s",
-            exc.response.status_code,
-            message,
-        )
-        return None
-    except httpx.TimeoutException:
-        logger.warning("Gemini request timed out")
-        return None
-    except httpx.RequestError as exc:
-        logger.warning("Gemini connection failed (%s)", type(exc).__name__)
-        return None
-    except ValueError:
-        logger.warning("Gemini returned an invalid response payload")
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Gemini request failed (%s)", type(exc).__name__)
         return None
 
 
@@ -321,6 +301,10 @@ def chat(
 ):
     message = data.message.strip()
     normalized = _normalize(message)
+    # Keep a lightweight, privacy-conscious question log for admin analytics.
+    # It stores the text the signed-in student chose to send, not credentials or tokens.
+    db.add(AssistantQueryLog(user_id=user.id, question=message[:2000], source="received"))
+    db.commit()
 
     result_words = {"درجتي", "نتيجتي", "النتيجه", "الدرجة", "score", "result"}
     if any(word in normalized for word in result_words):
@@ -345,7 +329,7 @@ def chat(
     gemini_message = message
     if follow_up == "word":
         instruction = (
-            "اشرح الكلمة المطلوبة بالعربية، واذكر المعنى بالعربي والنطق إن أمكن ومثالًا بسيطًا بالإنجليزية "
+            "اشرح الكلمة المطلوبة بالعربية، واذكر المعنى بالعربي ومثالًا بسيطًا بالإنجليزية "
             "وترجمة المثال."
         )
         gemini_message = f"اشرح معنى الكلمة التالية: {message}"
@@ -357,7 +341,7 @@ def chat(
         for phrase in ("معنى كلمة", "معنى الكلمة", "translate", "ترجم", "ترجمة")
     ):
         instruction = (
-            "إذا كان السؤال عن كلمة إنجليزية، اذكر معناها بالعربية والنطق إن أمكن ومثالًا بسيطًا بالإنجليزية "
+            "إذا كان السؤال عن كلمة إنجليزية، اذكر معناها بالعربية ومثالًا بسيطًا بالإنجليزية "
             "وترجمة المثال. وإذا كان طلب ترجمة، قدم الترجمة واشرح أي تعبير غير مباشر باختصار."
         )
     elif any(

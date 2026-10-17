@@ -21,7 +21,7 @@ services:
       DATABASE_URL: postgresql+psycopg://raed:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/raed
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-m47662226@gmail.com}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-Raedzeid15@gmail.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
       ADMIN_OTP_REQUIRED: ${ADMIN_OTP_REQUIRED:-false}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

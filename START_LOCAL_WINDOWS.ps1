@@ -56,7 +56,7 @@ if (-not (Test-Path $envPath)) {
         'ENV=development',
         "SITE_ADDRESS=http://127.0.0.1:$frontendPort",
         "JWT_SECRET=$jwt",
-        'ADMIN_EMAIL=m47662226@gmail.com',
+        'ADMIN_EMAIL=Raedzeid15@gmail.com',
         "ADMIN_PASSWORD=$pwd",
         'ADMIN_OTP_REQUIRED=false',
         "ALLOWED_ORIGINS=http://localhost:$frontendPort,http://127.0.0.1:$frontendPort,http://localhost:3000,http://127.0.0.1:3000",

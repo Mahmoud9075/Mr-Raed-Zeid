@@ -98,6 +98,7 @@ export default function Header({ lang = 'ar' }: { lang?: Lang }) {
               className="nav-quick-action nav-language-link"
               href={en ? '/' : '/en'}
               aria-label={en ? 'العربية' : 'English'}
+              onClick={() => setMenuOpen(false)}
             >
               <span aria-hidden="true">◎</span>
               <b>{en ? 'AR' : 'EN'}</b>

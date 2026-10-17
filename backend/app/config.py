@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     access_token_minutes: int = 15
     refresh_token_days: int = 7
     allowed_origins: str = "http://localhost:3100,http://127.0.0.1:3100,http://localhost:3000,http://127.0.0.1:3000"
-    admin_email: str = "m47662226@gmail.com"
+    admin_email: str = "Raedzeid15@gmail.com"
     admin_password: str = ""
     rate_limit_per_minute: int = 120
     auth_rate_limit_per_minute: int = 12
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     upload_dir: str = str(DEFAULT_UPLOAD_DIR)
     max_upload_mb: int = 5
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""

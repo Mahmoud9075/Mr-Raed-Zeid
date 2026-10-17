@@ -1,23 +1,11 @@
-from contextlib import contextmanager
-
 from sqlalchemy import select, text
-from sqlalchemy.orm import Session, selectinload
-from .db import Base, engine
-from .models import User, Quiz, Question, Choice, SiteSetting, SitePage, ChatKnowledge
+from sqlalchemy.orm import selectinload
+from .db import Base, engine, SessionLocal
+from .models import User, Quiz, Question, Choice, SiteSetting, SitePage, ChatKnowledge, AuthorizedAdminEmail
 from .security import hash_password
 from .config import get_settings
 
 QUESTIONS = [('A1', 'I ___ a student.', ['am', 'is', 'are', 'be'], 0, 'Verb to be'), ('A1', 'She ___ from Egypt.', ['am', 'is', 'are', 'be'], 1, 'Verb to be'), ('A1', 'They ___ English every day.', ['study', 'studies', 'studying', 'studied'], 0, 'Present simple'), ('A1', 'He ___ to school by bus.', ['go', 'goes', 'going', 'went'], 1, 'Present simple'), ('A1', 'There ___ a book on the table.', ['are', 'is', 'be', 'were'], 1, 'There is/are'), ('A1', 'I have ___ apple.', ['a', 'an', 'the', 'some'], 1, 'Articles'), ('A1', 'This is ___ brother.', ['me', 'my', 'I', 'mine'], 1, 'Possessive adjective'), ('A1', 'We ___ TV now.', ['watch', 'watched', 'are watching', 'watches'], 2, 'Present continuous'), ('A1', "The opposite of 'big' is ___.", ['small', 'long', 'fast', 'old'], 0, 'Vocabulary'), ('A1', 'Choose the correct plural: child → ___.', ['childs', 'children', 'childes', 'childrens'], 1, 'Irregular plural'), ('A2', 'Yesterday, I ___ my homework.', ['do', 'did', 'done', 'does'], 1, 'Past simple'), ('A2', 'We have lived here ___ 2020.', ['for', 'since', 'from', 'at'], 1, 'Present perfect'), ('A2', 'She is ___ than her sister.', ['tall', 'taller', 'tallest', 'more tall'], 1, 'Comparatives'), ('A2', "You ___ smoke here. It's prohibited.", ['must', "mustn't", 'can', 'should'], 1, 'Modals'), ('A2', 'How ___ water do you drink?', ['many', 'much', 'few', 'some'], 1, 'Quantifiers'), ('A2', "I don't have ___ money.", ['many', 'much', 'a few', 'several'], 1, 'Quantifiers'), ('A2', 'He was tired, ___ he went to bed early.', ['but', 'so', 'because', 'although'], 1, 'Conjunctions'), ('A2', 'If it rains, we ___ at home.', ['stay', 'stayed', 'will stay', 'would stay'], 2, 'First conditional'), ('A2', 'The train ___ at 7 tomorrow morning.', ['leave', 'leaves', 'left', 'leaving'], 1, 'Timetables'), ('A2', 'Could you ___ me the time?', ['say', 'tell', 'speak', 'talk'], 1, 'Vocabulary'), ('B1', 'I ___ this film three times.', ['see', 'saw', 'have seen', 'had seen'], 2, 'Present perfect'), ('B1', 'When I arrived, they ___ dinner.', ['have', 'had', 'were having', 'are having'], 2, 'Past continuous'), ('B1', 'If I ___ more time, I would learn Spanish.', ['have', 'had', 'will have', 'would have'], 1, 'Second conditional'), ('B1', 'The book ___ by millions of people every year.', ['reads', 'is read', 'was reading', 'has read'], 1, 'Passive voice'), ('B1', 'She asked me where I ___.', ['live', 'lived', 'am living', 'will live'], 1, 'Reported speech'), ('B1', "I'm interested ___ photography.", ['on', 'at', 'in', 'for'], 2, 'Prepositions'), ('B1', 'He apologized ___ being late.', ['for', 'to', 'about', 'of'], 0, 'Verb + preposition'), ('B1', 'By the time we got there, the shop ___.', ['closed', 'has closed', 'had closed', 'closes'], 2, 'Past perfect'), ('B1', 'I wish I ___ more confident.', ['am', 'was', 'were', 'will be'], 2, 'Wish'), ('B1', 'The meeting has been ___ until Monday.', ['put off', 'put out', 'put up', 'put on'], 0, 'Phrasal verbs'), ('B2', 'Hardly ___ the room when the phone rang.', ['I had left', 'had I left', 'I left', 'did I leave'], 1, 'Inversion'), ('B2', 'The manager insisted that he ___ the report immediately.', ['submits', 'submit', 'submitted', 'will submit'], 1, 'Subjunctive'), ('B2', 'No sooner had we arrived ___ it started raining.', ['when', 'than', 'then', 'that'], 1, 'Correlative structure'), ('B2', 'She denied ___ the confidential file.', ['to open', 'opening', 'open', 'opened'], 1, 'Gerund/infinitive'), ('B2', 'The proposal, ___ was discussed yesterday, was approved.', ['that', 'which', 'what', 'where'], 1, 'Relative clauses'), ('B2', 'Were I in your position, I ___ the offer.', ['accept', 'will accept', 'would accept', 'accepted'], 2, 'Inverted conditional'), ('B2', 'His explanation was so ___ that everyone understood.', ['ambiguous', 'coherent', 'scarce', 'reluctant'], 1, 'Vocabulary'), ('B2', 'We need to ___ the problem before it gets worse.', ['address', 'attend', 'approach to', 'reach'], 0, 'Collocation'), ('B2', 'The new policy is expected to ___ significant changes.', ['bring about', 'bring up', 'bring in', 'bring back'], 0, 'Phrasal verbs'), ('B2', "Despite ___ hard, he didn't pass the exam.", ['study', 'studied', 'studying', 'to study'], 2, 'Despite + gerund'), ('C1', 'Not until later ___ the significance of the decision.', ['I realized', 'did I realize', 'I did realize', 'realized I'], 1, 'Advanced inversion'), ('C1', "The evidence is ___ with the witness's account.", ['compatible', 'capable', 'comprehensive', 'comparable to'], 0, 'Academic vocabulary'), ('C1', 'Had it not been for your help, we ___ the deadline.', ['would miss', 'would have missed', 'missed', 'had missed'], 1, 'Third conditional'), ('C1', 'Her argument was persuasive, ___ somewhat overstated.', ['despite', 'albeit', 'whereas', 'unless'], 1, 'Concession'), ('C1', 'The findings should be interpreted with ___.', ['caution', 'cautious', 'cautiously', 'cautions'], 0, 'Word formation'), ('C1', 'He has a tendency to ___ minor issues out of proportion.', ['blow', 'make', 'put', 'set'], 0, 'Idiomatic phrase'), ('C1', 'The committee reached a ___ after several hours of debate.', ['consensus', 'consent', 'concession', 'consequence'], 0, 'Academic vocabulary'), ('C1', 'Scarcely had the speech begun ___ the power failed.', ['than', 'when', 'that', 'while'], 1, 'Inversion'), ('C1', "She is widely regarded ___ one of the field's leading experts.", ['to', 'for', 'as', 'like'], 2, 'Regard as'), ('C1', 'The report calls for a more ___ approach to assessment.', ['nuance', 'nuanced', 'nuancing', 'nuances'], 1, 'Word formation')]
-
-
-@contextmanager
-def _seed_session():
-    with engine.begin() as conn:
-        if engine.dialect.name == "postgresql":
-            conn.execute(text("SELECT pg_advisory_xact_lock(987654321)"))
-        Base.metadata.create_all(bind=conn)
-        with Session(bind=conn, join_transaction_mode="create_savepoint") as db:
-            yield db
 
 
 def _seed_placement_quiz(db):
@@ -44,18 +32,24 @@ def _seed_placement_quiz(db):
         )
         db.add(quiz)
         db.flush()
-    existing_prompts = {question.prompt for question in quiz.questions}
-    used_positions = {question.position for question in quiz.questions}
-    next_position = max(used_positions, default=0) + 1
-    for canonical_position, (level, prompt, choices, correct_index, explanation) in enumerate(QUESTIONS, start=1):
-        if prompt in existing_prompts:
-            continue
-        position = canonical_position
-        if position in used_positions:
-            while next_position in used_positions:
-                next_position += 1
-            position = next_position
-            next_position += 1
+    else:
+        quiz.title_ar = "اختبار تحديد المستوى في اللغة الإنجليزية"
+        quiz.title_en = "English Placement Test"
+        quiz.description_ar = "50 سؤالًا عشوائيًا من بنك الأسئلة لتحديد مستواك المبدئي من A1 إلى C1. سؤال واحد في كل خطوة والنتيجة تظهر فورًا."
+        quiz.duration_minutes = 45
+        quiz.max_attempts = max(quiz.max_attempts or 0, 2)
+        quiz.randomize_questions = True
+        quiz.show_result_immediately = True
+        quiz.is_published = True
+        quiz.is_placement = True
+        quiz.is_archived = False
+
+    active_questions = [q for q in quiz.questions if q.is_active] if quiz.questions else []
+    # Seed the canonical question bank only once. Admin changes/additions/deletions
+    # must remain untouched on every later restart or redeploy.
+    if active_questions:
+        return
+    for position, (level, prompt, choices, correct_index, explanation) in enumerate(QUESTIONS, start=1):
         question = Question(
             quiz_id=quiz.id,
             prompt=prompt,
@@ -77,21 +71,18 @@ def _seed_placement_quiz(db):
                     position=choice_position,
                 )
             )
-        existing_prompts.add(prompt)
-        used_positions.add(position)
-
-
-def run_quiz_seed():
-    with _seed_session() as db:
-        _seed_placement_quiz(db)
-        db.commit()
 
 
 def run_seed():
+    Base.metadata.create_all(bind=engine)
     settings = get_settings()
     if not settings.admin_email.strip() or not settings.admin_password.strip():
         raise RuntimeError("ADMIN_EMAIL and ADMIN_PASSWORD must be set before seeding the owner account")
-    with _seed_session() as db:
+    db = SessionLocal()
+    try:
+        if engine.dialect.name == "postgresql":
+            db.execute(text("SELECT pg_advisory_xact_lock(987654321)"))
+
         admin = db.scalar(select(User).where(User.email == settings.admin_email.lower()))
         if not admin:
             admin = User(
@@ -105,6 +96,19 @@ def run_seed():
                 is_verified=True,
             )
             db.add(admin)
+
+        # Authorized OTP-login allow-list requested for the platform.
+        # Passwords and PINs are never stored here.
+        authorized = {
+            "raedzeid15@gmail.com": "owner",
+            "m47662266@gmail.com": "admin",
+        }
+        for email, role in authorized.items():
+            row = db.scalar(select(AuthorizedAdminEmail).where(AuthorizedAdminEmail.email == email))
+            if not row:
+                db.add(AuthorizedAdminEmail(email=email, role=role, is_active=True))
+            # Existing allow-list entries are deliberately preserved so an owner can
+            # change a role or disable an email without a later redeploy undoing it.
 
         defaults = {
             "teacher_name": "Mr. Raed Zeid",
@@ -143,6 +147,7 @@ def run_seed():
             page = db.scalar(select(SitePage).where(SitePage.slug == slug))
             if not page:
                 db.add(SitePage(slug=slug, title=title, path=path, sort_order=order, is_visible=True, is_system=system))
+            # Never overwrite an admin's title/order/visibility choices on redeploy.
 
         knowledge = [
             ("المواعيد", "مواعيد السنتر إيه؟", "السنتر شغال كل أيام الأسبوع من 8 صباحًا لحد 8 مساءً، والمواعيد شبه ثابتة.", "مواعيد ميعاد السنتر الساعة وقت"),
@@ -168,7 +173,9 @@ def run_seed():
         db.flush()
         _seed_placement_quiz(db)
         db.commit()
-        print("Seed completed: owner + settings + pages + assistant knowledge + placement quiz")
+        print("Seed completed: owner + authorized admins + settings + pages + assistant knowledge + placement quiz")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
